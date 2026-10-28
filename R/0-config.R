@@ -17,6 +17,15 @@ library(haven)
 library(renv)
 library(skimr)
 library(osfr)
+library(ggplot2)
+library(sf)
+library(ggspatial)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(dplyr)
+library(scales)
+library(cowplot)
+library(grid)
 
 # ---------------------
 # analysis packages
@@ -43,12 +52,6 @@ library(RColorBrewer)
 library(foreach)
 library(doParallel)
 registerDoParallel(detectCores() - 1)
-
-#----------------------------
-# pathogen list
-#----------------------------
-pathogen_labels <- c("Norovirus GI/GII","LT-ETEC (LTB)","Campylobacter (p18,p39)","Shigella/EIEC (IpaB)","S. enterica typhi (HylE)","S. enterica (LPS B,D)","Cholera (OSP-Inaba/Ogawa)","Cryptosporidium (Cp17,Cp23)","Giardia (VSP-5)","E. histolytica (LecA)","T. solium (T24,Es33)","S. stercoralis (NIE)")
-
 
 #----------------------------
 # custom color palettes
