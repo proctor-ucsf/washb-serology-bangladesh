@@ -1,6 +1,6 @@
 # washb-serology-bangladesh
 
-# WASH Benefits serology study - Bangladesh RCT outcomes analysis
+WASH Benefits serology study - Bangladesh RCT outcomes analysis
 
 This repository contains statistical analysis code and supporting materials for the manuscript described below.
 
