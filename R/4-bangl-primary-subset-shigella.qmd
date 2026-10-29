@@ -1,0 +1,270 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "Sensitivity analysis - WASH+Nutrition vs Control for Shigella/EIEC (IpaB), restricted to the Serimmune substudy (n=120)"
+author: "Pearl Ante-Testard and Julianna Colado (julianna.colado@ucsf.edu)"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+
+# Preamble
+
+```{r}
+#| label: preamble
+
+#----------------------------
+# clean environment
+#----------------------------
+rm(list=ls(all=TRUE))
+#----------------------------
+# source the config file
+#----------------------------
+library(here)
+here()
+source(here("R","0-config.R"))
+options(knitr.kable.NA = '-')
+
+#----------------------------
+# analysis constants
+#----------------------------
+pathogen_target <- "Shigella/EIEC (IpaB)"
+n_expected <- 120
+```
+
+# Read in the data
+
+```{r}
+#| label: read data
+
+#----------------------------
+# Luminex seropositivity data
+#----------------------------
+d1 <- read_rds(file = here("../../data/bangl/luminex/final/",
+                           "washb_bangl_luminex_igg_seropos_pathogen_2026-01-29.rds")) %>%
+  # final visit only
+  filter(visit == 3) %>%
+  # left_join(tx, by = join_by(clusterid)) %>%
+  filter(!is.na(tr)) %>%
+  # Indicatior for WSH and Nutrition interventions
+  mutate(wsh = ifelse(tr %in% c("WSH","Nutrition + WSH"), 1, 0), 
+         nutr = ifelse(tr %in% c("Nutrition","Nutrition + WSH"), 1, 0),
+         wshf = ifelse(wsh==1,"WASH","No WASH"),
+         nutrf = ifelse(nutr==1,"Nutrition","No Nutrition"),
+         wshf = factor(wshf, levels=c("No WASH","WASH")),
+         nutrf = factor(nutrf, levels=c("No Nutrition","Nutrition")))
+
+#----------------------------
+# Serimmune substudy metadata
+#----------------------------
+serimmune <- read_csv(
+  here("data", "washb-serimmune-metadata-230616.csv")) 
+
+serimmune_ids <- serimmune %>%
+  pull(dataid)
+```
+
+# Link Serimmune to the Luminex data
+```{r}
+#----------------------------
+# derive the 5-digit dataid
+# from the middle of childid
+#----------------------------
+dataid_start <- 7   
+dataid_stop  <- 11   
+
+d1 <- d1 %>%
+  mutate(dataid = str_sub(childid, dataid_start, dataid_stop))
+
+
+#----------------------------
+# restrict d1 to the substudy
+#----------------------------
+d_sub <- d1 %>%
+  filter(dataid %in% serimmune_ids,
+         pathogen == "Shigella")
+```
+
+## Seroprevalence by arm
+```{r}
+#| label: descriptive prevalence
+
+prev_sub <- d_sub %>%
+  group_by(tr) %>%
+  summarise(n = sum(!is.na(seropos)),
+            total_seropos = sum(seropos, na.rm = TRUE),
+            prev = mean(seropos, na.rm = TRUE),
+            .groups = "drop") %>%
+  mutate(prev = round(100*prev, 1),
+         prev_fmt = paste0(prev, "% (", total_seropos, "/", n, ")"))
+
+prev_sub %>%
+  select(tr, prev_fmt) %>%
+  kbl(caption = paste0("Luminex seroprevalence, ", pathogen_target,
+                       ", Serimmune substudy at 24 months"),
+      col.names = c("Arm", "Seroprevalence (n/N)")) %>%
+  kable_classic(full_width = FALSE, html_font = "Times")
+```
+
+# WASH+Nutrition vs Control
+
+
+## Estimate the treatment effect
+
+
+```{r}
+#| label: fit models
+d_shig <- d_sub %>%
+  mutate(tr = factor(as.character(tr),
+                     levels = c("Control","Nutrition + WSH")))
+#----------------------------
+# helper: fit, cluster-robust vcov,
+# marginal means and the contrast
+#----------------------------
+fit_contrast <- function(dat) {
+
+  # linear-binomial model, identity link,
+  # so the coefficient is a risk difference
+  fiti <- glm(seropos ~ tr, data = dat, family = gaussian(link = "identity"))
+
+  # cluster-robust SEs at the randomization unit
+  fiti_vcovCL <- sandwich::vcovCL(fiti, cluster = dat$clusterid)
+
+  musi  <- emmeans(fiti, ~ tr, vcov = fiti_vcovCL) %>% regrid(type = "response")
+  diffi <- pairs(musi, reverse = TRUE)
+
+  means_df <- as.data.frame(musi)
+  diff_df  <- as.data.frame(diffi) %>%
+    mutate(min95 = estimate - 1.96*SE,
+           max95 = estimate + 1.96*SE)
+
+  list(fit = fiti, means = means_df, diff = diff_df)
+}
+
+#----------------------------
+# unadjusted contrast on all
+# children with a non-missing outcome
+#----------------------------
+d_shig_all <- d_shig %>% filter(!is.na(seropos))
+
+res_unadj <- fit_contrast(d_shig_all)
+```
+
+```{r}
+#| label: model results table
+
+#------------------------------
+# create formatted RD estimates
+#------------------------------
+model_tbl <- res_unadj$diff %>%
+  mutate(
+    spec = "Unadjusted",
+    n    = nrow(d_shig_all),
+    rd   = estimate*100,
+    rd_print = paste0(sprintf("%1.1f", estimate*100), " (",
+                      sprintf("%1.1f", min95*100), ", ",
+                      sprintf("%1.1f", max95*100), ")"),
+    p_robust = sprintf("%1.3f", p.value)
+  ) %>%
+  select(spec, n, rd_print, p_robust)
+
+model_tbl %>%
+  kbl(caption = paste0("Risk difference (percentage points), WASH+Nutrition vs Control, ",
+                       pathogen_target),
+      align = c("l", rep("c", 3)),
+      col.names = c("Specification", "N", "RD (95% CI)", "Cluster-robust p")) %>%
+  kable_classic(full_width = FALSE, html_font = "Times") %>%
+  column_spec(1, bold = TRUE, border_right = TRUE, width = "15em") %>%
+  footnote(
+    general = c(
+      "Risk difference on the identity scale, in percentage points, from linear-binomial regression.",
+      "Standard errors are cluster-robust at the cluster (randomization unit) level."
+    ),
+    general_title = "Note: ",
+    threeparttable = TRUE
+  )
+```
+
+# Permutation p-value
+
+
+```{r}
+#| label: permutation test
+
+set.seed(12345)
+npermute <- 10006
+
+#----------------------------
+# unique cluster / arm
+#----------------------------
+cl_tx <- d_shig_all %>%
+  select(clusterid, tr) %>%
+  distinct() %>%
+  # group_by(block) %>%
+  mutate(tx = as.character(tr))
+
+#----------------------------
+# permuted assignments,
+#----------------------------
+perm_mat <- matrix(nrow = nrow(cl_tx), ncol = npermute)
+for (i in 1:npermute) {
+  cl_txi <- cl_tx %>% mutate(txi = sample(tx, replace = FALSE))
+  perm_mat[,i] <- cl_txi$txi
+}
+
+#----------------------------
+# observed test statistic:
+# regression coefficient from the
+# unadjusted linear model
+#----------------------------
+obs_fit  <- lm(seropos ~ tr, data = d_shig_all)
+obs_coef <- coef(obs_fit)[["trNutrition + WSH"]]
+
+#----------------------------
+# permutation null distribution
+#----------------------------
+d_perm <- d_shig_all %>% select(clusterid, seropos)
+
+permute_dist <- foreach(permi = 1:npermute, .combine = rbind) %do% {
+  dij <- d_perm %>%
+    left_join(data.frame(clusterid = cl_tx$clusterid,
+                         tr_perm   = perm_mat[,permi]),
+              join_by(clusterid)) %>%
+    mutate(tr_perm = factor(tr_perm, levels = c("Control","Nutrition + WSH")))
+  fiti <- lm(seropos ~ tr_perm, data = dij)
+  data.frame(permute_n = permi, est = coef(fiti)[["tr_permNutrition + WSH"]])
+}
+
+p_perm <- mean(abs(permute_dist$est) >= abs(obs_coef), na.rm = TRUE)
+```
+
+
+
+```{r}
+#| label: permutation plot
+
+ggplot(data = permute_dist, aes(x = est)) +
+  geom_histogram(bins = 50, alpha = 0.5, color = NA) +
+  geom_vline(xintercept = obs_coef, lty = "dashed") +
+  annotate("text", x = Inf, y = Inf, hjust = 1.1, vjust = 1.5,
+           label = paste0("P = ", sprintf("%1.3f", p_perm))) +
+  labs(title = paste0("Permutation null, WASH+Nutrition vs Control: ", pathogen_target),
+       x = "permutation null distribution (WASH+N - Control)",
+       y = "permutations") +
+  theme_minimal()
+
+```
+
+
+
+
+# Session Info
+
+```{r}
+sessionInfo()
+```
+
