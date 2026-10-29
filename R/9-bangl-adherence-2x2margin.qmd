@@ -1,0 +1,250 @@
+---
+title: "WASH-Bangladesh-Adherance-2x2Margin-woroking"
+subtitle: "Measures of intervention adherence by treatment margin at enrollment, 1-year follow-up, and 2-year follow-up"
+author: "Julianna Colado"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+# Preamble
+
+```{r}
+#| message: false
+
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+setwd("/Users/jcolado/Library/CloudStorage/Box-Box/washb-serology/projects/8-washbb-rct/data") #update file path
+#---------------------------------------
+# load + merge data
+#---------------------------------------
+d <- read.csv("washb-bangladesh-uptake-public.csv",
+              colClasses = c(dataid = "character", clusterid = "character"))
+
+d_tr <- read.csv("washb-bangladesh-tr-public.csv",
+                 colClasses = c(clusterid = "character"))
+
+d <- left_join(d, d_tr, by = c("clusterid", "block"))
+
+
+
+```
+
+
+
+
+```{r}
+#---------------------------------------
+# restrict to the 4-arm 2x2 factorial subset
+#---------------------------------------
+subset_arms <- c("Control", "WSH", "Nutrition", "Nutrition + WSH")
+d <- d %>% filter(tr %in% subset_arms)
+
+#---------------------------------------
+# define the two factorial margins
+#---------------------------------------
+d <- d %>%
+  mutate(
+    wash = case_when(
+      tr %in% c("WSH", "Nutrition + WSH")   ~ "WASH",
+      tr %in% c("Control", "Nutrition")     ~ "No WASH"),
+    nut = case_when(
+      tr %in% c("Nutrition", "Nutrition + WSH") ~ "Nutrition",
+      tr %in% c("Control", "WSH")               ~ "No Nutrition")
+  )
+
+# indicators shown in Table 3
+inds <- c("storewat", "freechl", "latseal", "latfeces", "hwss", "rlnsp")
+
+#---------------------------------------
+# summarize n (%) for one margin grouping.
+# same long-reshape / mean-N-n logic as the
+# verified script, but grouped on the margin
+# variable instead of `tr`.
+#---------------------------------------
+summ_margin <- function(data, group_var) {
+  data %>%
+    select(dataid, clusterid, block, svy,
+           group = all_of(group_var), all_of(inds)) %>%
+    pivot_longer(cols = all_of(inds),
+                 names_to = "indicator", values_to = "value") %>%
+    group_by(indicator, group, svy) %>%
+    summarize(mean = mean(value, na.rm = TRUE),
+              N    = sum(!is.na(value)),
+              n    = sum(value, na.rm = TRUE),
+              .groups = "drop") %>%
+    # n is meaningless for LNS (rlnsp is % of expected, not binary)
+    mutate(n = ifelse(indicator == "rlnsp", NA, n))
+}
+
+wash_sum <- summ_margin(d, "wash")
+nut_sum  <- summ_margin(d, "nut")
+dsum <- bind_rows(wash_sum, nut_sum)
+
+#---------------------------------------
+# applicability / blanking rule.
+# Chlorine was distributed only to WSH-containing
+# arms, so free chlorine is reported only in the
+# WASH group (blanked everywhere else, matching the
+# paper's convention of blanking control/non-water
+# arms). LNS was given only to nutrition-containing
+# arms, so it is reported only in the Nutrition group.
+# Enrolment freechl/LNS are not measured (N=0
+# -> blanks naturally).
+#---------------------------------------
+dsum <- dsum %>%
+  mutate(
+    applicable = case_when(
+      indicator == "freechl" & group != "WASH"      ~ FALSE,
+      #indicator == "rlnsp"   & group != "Nutrition" ~ FALSE,
+      TRUE ~ TRUE),
+    pct = round(mean * 100),
+    cell = case_when(
+      !applicable                       ~ "..",
+      indicator == "rlnsp" & N == 0     ~ "..",
+      indicator == "rlnsp"              ~ paste0(pct, "%"),
+      N == 0 | is.nan(mean)             ~ "..",
+      TRUE                              ~ paste0(n, "/", N, " (", pct, "%)"))
+  )
+
+#---------------------------------------
+# assemble the wide table:
+#   columns = WASH | No WASH | Nutrition | No Nutrition
+#   rows    = indicator x survey round
+#---------------------------------------
+col_order <- c("WASH", "No WASH", "Nutrition", "No Nutrition")
+
+tab <- dsum %>%
+  mutate(svy = factor(svy, levels = c(0, 1, 2),
+                      labels = c("Enrollment", "Year 1", "Year 2")),
+         indicator = factor(indicator, levels = inds)) %>%
+  select(indicator, svy, group, cell) %>%
+  pivot_wider(names_from = group, values_from = cell) %>%
+  select(indicator, svy, all_of(col_order)) %>%
+  arrange(indicator, svy)
+
+#---------------------------------------
+# number of compounds assessed per margin
+# group x round, in fraction format num/N (%):
+#   num = compounds measured at the round
+#   N   = number enrolled in the margin group
+#         (= enrolment count), so enrolment = 100%
+# (each compound is counted in one WASH group
+#  and one Nutrition group)
+#---------------------------------------
+assessed_margin <- function(group_var) {
+  counts <- d %>%
+    group_by(group = .data[[group_var]], svy) %>%
+    summarize(num = n(), .groups = "drop")
+  denom <- counts %>% filter(svy == 0) %>% select(group, N_enr = num)
+  counts %>%
+    left_join(denom, by = "group") %>%
+    mutate(pct  = round(100 * num / N_enr),
+           cell = paste0(num, "/", N_enr, " (", pct, "%)"))
+}
+
+ncomp <- bind_rows(assessed_margin("wash"), assessed_margin("nut")) %>%
+  mutate(svy = factor(svy, levels = c(0, 1, 2),
+                      labels = c("Enrollment", "Year 1", "Year 2"))) %>%
+  select(group, svy, cell) %>%
+  pivot_wider(names_from = group, values_from = cell) %>%
+  select(svy, all_of(col_order))
+
+#---------------------------------------
+# indicator labels
+#---------------------------------------
+indlab <- c(
+  storewat = "Stored drinking water",
+  freechl  = "Stored drinking water has detectable free chlorine (>0.1 mg/L)",
+  latseal  = "Latrine with a functional water seal",
+  latfeces = "No visible feces on latrine slab or floor",
+  hwss     = "Handwashing location has soap",
+  rlnsp    = "LNS sachets consumed (% expected)*"
+)
+
+
+#---------------------------------------
+# lead with the compound-count block (the top
+# row block of the published Table 3), then the
+# indicator rows.
+#---------------------------------------
+ncomp_out <- ncomp %>%
+  mutate(Indicator = "Number of compounds assessed") %>%
+  rename(Round = svy) %>%
+  select(Indicator, Round, all_of(col_order))
+
+out <- tab %>%
+  mutate(indicator = recode(as.character(indicator), !!!indlab)) %>%
+  rename(Indicator = indicator, Round = svy)
+
+out <- bind_rows(ncomp_out, out)
+```
+
+
+
+# Measures of intervention adherence by treatment margin (WASH vs. No WASH, Nutrition vs. No Nutrition) at enrollment, 1-year follow-up, and 2-year follow-up
+
+```{r}
+
+kbl(out,
+    align   = c("l", "l", "c", "c", "c", "c"),
+    caption = "Bangladesh: intervention adherence by 2×2 factorial margin") %>%
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover", "condensed")) %>%
+  # narrow the Indicator column (labels wrap) and give the data columns room.
+  # NOTE: column_spec() must run BEFORE collapse_rows(), which rewrites the
+  # table's cell structure and would otherwise break column indexing.
+  column_spec(1, width = "13em") %>%
+  column_spec(2, width = "5em") %>%
+  column_spec(3:6, width = "7em") %>%
+  # merge the repeated Indicator labels so each spans its three rounds
+  collapse_rows(columns = 1, valign = "top") %>%
+  footnote(general_title = "",
+           general = paste(
+             "Data are n (%) or %. '..' = not measured or not interpretable on",
+             "this margin. Free chlorine reported for the WASH group only; LNS for",
+             "the Nutrition group only (% of expected). Both not measured at enrolment."))
+```
+
+
+
+
+# Save and Export
+```{r}
+#---------------------------------------
+# write a flat CSV & Word Doc
+# (paths are relative to this .qmd in bangladesh/R,
+#  so "../" writes into the bangladesh/ folder)
+#---------------------------------------
+write.csv(out, "../output/wash-adherence-2x2margin-bangladesh.csv", row.names = FALSE)
+
+# Word doc copy: build a flextable and save it.
+# save_as_docx() uses the officer backend (writes .docx
+# directly, no pandoc needed).
+library(flextable)
+library(officer)
+ft <- flextable(out) %>%
+  merge_v(j = "Indicator") %>%
+  valign(j = "Indicator", valign = "top") %>%
+  fontsize(size = 9, part = "all") %>%
+  width(j = "Indicator", width = 2.2) %>%   # narrow the label column (inches)
+  # fit the whole table to the page width so it isn't clipped
+  set_table_properties(layout = "autofit", width = 1)
+save_as_docx(
+  ft, path = "../output/wash-adherence-2x2margin-bangladesh.docx",
+  # landscape gives the 6 columns room to breathe
+  pr_section = prop_section(page_size = page_size(orient = "landscape"))
+)
+```
+
+# Session info
+```{r}
+sessionInfo()
+```
+
+
