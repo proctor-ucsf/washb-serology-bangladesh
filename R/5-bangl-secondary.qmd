@@ -1,0 +1,1091 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "Secondary analysis - seroprevalence at the second visit (~12 months)"
+author: "Pearl Ante-Testard (pearl.ante@ucsf.edu)"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+# Preamble
+
+```{r preamble}
+#| label: preamble
+
+#----------------------------
+# clean environment
+#----------------------------
+rm(list=ls(all=TRUE))
+#----------------------------
+# source the config file
+#----------------------------
+library(here)
+here()
+source(here("R","0-config.R"))
+options(knitr.kable.NA = '-')
+```
+
+
+# Read in the data
+
+```{r}
+d1 <- read_rds(file = here("../../data/bangl/luminex/final/",
+                           "washb_bangl_luminex_igg_seropos_pathogen_2026-09-16.rds")) %>%
+  # final visit only
+  filter(visit == 2) %>%
+  #mutate(
+    #pathogenf = pathogenf,
+    #pathogenf = recode(
+      #pathogenf,
+      #"S. enterica typhi (HylE)" = "S. enterica typhi (HlyE)"
+    #)) %>%
+  filter(!is.na(tr)) %>%
+  # Indicatior for WSH and Nutrition interventions
+  mutate(wsh = ifelse(tr %in% c("WSH","Nutrition + WSH"), 1, 0), 
+         nutr = ifelse(tr %in% c("Nutrition","Nutrition + WSH"), 1, 0),
+         wshf = ifelse(wsh==1,"WASH","No WASH"),
+         nutrf = ifelse(nutr==1,"Nutrition","No Nutrition"),
+         wshf = factor(wshf, levels=c("No WASH","WASH")),
+         nutrf = factor(nutrf, levels=c("No Nutrition","Nutrition")))
+
+
+```
+
+# Secondary analysis
+
+- Seroprevalence at visit 2 (~12 months). We will summarize seroprevalence similar to the primary analysis but using measurements collected from EED substudy children at visit 2. 
+
+
+# Basic outcome summary at 12 months
+
+## Table 1. Overall pathogen-level seroprevalence at 12 months
+
+```{r}
+prev_tbl <- d1 %>%
+  group_by(pathogenf) %>%
+  summarise(n = sum(!is.na(seropos)), 
+            total_seropos = sum(seropos, na.rm = T),
+            prev = mean(seropos, na.rm = T), 
+            .groups = "drop") %>%
+  mutate(prev = round(prev, 3)) 
+
+prev_tbl %>%
+  kable(caption = "Pathogen-level seroprevalence at 12-month visit",
+        col.names = c("Pathogen", "N", "Sero Positive", "Prevalence")) %>%
+  kable_classic(full_width = FALSE, html_font = "Times")
+```
+
+## Table 2. Marginal and conditional pathogen-level seroprevalence at 12 months
+
+```{r}
+# -----------------------------------------------
+# 1) Conditional prevalence (by treatment arm tr) 
+# -----------------------------------------------
+cond_prev <- d1 %>%
+  group_by(pathogenf, tr) %>%
+  summarise(n = sum(!is.na(seropos)), 
+            total_seropos = sum(seropos, na.rm = T),
+            prev = mean(seropos, na.rm = T), 
+            .groups = "drop") %>%
+  mutate(prev = round(100*prev, 1)) %>%
+  mutate(prev_fmt = paste0(prev, " (", total_seropos, "/", n, ")"))
+
+cond_wide <- cond_prev %>%
+  mutate(
+    tr = as.character(tr),
+    # optional: enforce a specific column order for arms
+    tr = fct_inorder(tr)
+  ) %>%
+  select(pathogenf, tr, prev_fmt) %>%
+  pivot_wider(
+    names_from  = tr,
+    values_from = prev_fmt
+  )
+
+# -----------------------------------------------
+# 2) Marginal prevalence (by WSH status)
+# -----------------------------------------------
+marg_prev_wsh <- d1 %>%
+  group_by(pathogenf, wsh) %>%
+  summarise(n = sum(!is.na(seropos)), 
+            total_seropos = sum(seropos, na.rm = T),
+            prev = mean(seropos, na.rm = T), 
+            .groups = "drop") %>%
+  mutate(prev = round(100*prev, 1)) %>%
+  mutate(prev_fmt = paste0(prev, " (", total_seropos, "/", n, ")"))
+
+marg_wsh_wide <- marg_prev_wsh %>%
+  mutate(
+    wshf_col = recode(as.character(wsh),
+                  `0` = "No WASH",
+                  `1` = "Combined WASH",
+                  ),
+    wshf_col = factor(wshf_col, levels = c("Combined WASH", "No WASH"))
+  ) %>%
+  select(pathogenf, wshf_col, prev_fmt) %>%
+  pivot_wider(names_from = wshf_col, values_from = prev_fmt)
+
+# -----------------------------------------------
+# 3) Marginal prevalence (by Nutrition status)
+# -----------------------------------------------
+marg_prev_nutr <- d1 %>%
+  group_by(pathogenf,nutr) %>%
+  summarise(n = sum(!is.na(seropos)), 
+            total_seropos = sum(seropos, na.rm = T),
+            prev = mean(seropos, na.rm = T), 
+            .groups = "drop") %>%
+  mutate(prev = round(100*prev, 1)) %>%
+  mutate(prev_fmt = paste0(prev, " (", total_seropos, "/", n, ")"))
+
+marg_nutr_wide <- marg_prev_nutr %>%
+  mutate(
+    nutr_col = recode(as.character(nutr),
+                  `0` = "No Nutrition",
+                  `1` = "Combined Nutrition",
+                  ),
+    nutr_col = factor(nutr_col, levels = c("Combined Nutrition", "No Nutrition"))
+  ) %>%
+  select(pathogenf, nutr_col, prev_fmt) %>%
+  pivot_wider(names_from = nutr_col, values_from = prev_fmt)
+```
+
+```{r}
+#| label: print prevalence table
+# -----------------------------------------------
+# Combine into one table
+# -----------------------------------------------
+prev_table <- cond_wide %>%
+  left_join(marg_wsh_wide,  by = "pathogenf") %>%
+  left_join(marg_nutr_wide, by = "pathogenf") 
+
+prev_table %>%
+  kbl(
+    booktabs = TRUE,
+    align = c("l", rep("c", ncol(prev_table) - 1)),
+    caption = "Conditional and marginal seroprevalence by pathogen at 12 months"
+  ) %>%
+  add_header_above(c(
+    " " = 1,
+    "Conditional prevalence (by treatment arm)" = 4,
+    "Marginal prevalence (by intervention)" = 4
+  )) %>%
+  kable_classic(full_width = FALSE, html_font = "Times") %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%   # after pathogen
+  column_spec(5, border_right = TRUE) %>%                # after conditional block
+  column_spec(7, border_right = TRUE) %>%
+  row_spec(0, bold = TRUE) %>%   # after pathogen
+  row_spec(
+    seq(2, nrow(prev_table), by = 2),
+    background = "#f7f7f7"
+  ) %>%
+  scroll_box(width = "100%", height = "500px") 
+
+saveRDS(prev_table, here("output", "washbb-seroprevalence-summary-12m.rds"))
+write_csv(prev_table, here("output", "washbb-seroprevalence-summary-12m.csv"))
+```
+
+
+# Estimate treatment effects
+
+- Note: We do not control for block in the analysis. The EED substudy did not retain the pair-matching in the design, so there are many blocks without treatment contrasts in them. We cannot therefore include fixed effects for block.
+
+```{r}
+#| label: estimate marginal means and effects in visit 2
+#-------------------------
+# fit models
+# order pathogens 
+# by virus, bacteria, 
+# protozoan, helminth
+#-------------------------
+pathogen_list <- levels(d1$pathogenf)
+
+#-------------------------
+# estimate marginal means
+# and differences
+# for visit 3
+#-------------------------
+marg_effects_v2 <- foreach(ii = 1:length(pathogen_list), .combine = rbind) %do% {
+  di <- d1 %>%
+    filter(pathogenf == pathogen_list[ii])
+    # fit linear regression
+    # For secondary analysis,	do not control for block in the analysis. 
+    fiti <- glm(seropos ~ wshf + nutrf, data=di, family=gaussian(link="identity"))
+    # estimate cluster-robust SEs
+    fiti_vcovCL <- sandwich::vcovCL(fiti, cluster = di$clusterid)
+    # estimate marginal means for each treatment margin, difference scale
+    musi_wash <- emmeans(fiti, ~ wshf   , vcov = fiti_vcovCL)
+    musi_wash <- regrid(musi_wash,type="response")
+    musi_nutr <- emmeans(fiti, ~ nutrf  , vcov = fiti_vcovCL)
+    musi_nutr <- regrid(musi_nutr,type="response")
+    # estimate marginal contrasts
+    diffi_wash <- pairs(musi_wash, simple = "each", reverse = TRUE)
+    diffi_nutr <- pairs(musi_nutr, simple = "each", reverse = TRUE)
+    # gather results
+    res1 <- data.frame(musi_wash) %>% 
+      rename(marginal_mean = wshf, se_mean = SE, df_mean = df)
+    res2 <- data.frame(musi_nutr) %>% 
+      rename(marginal_mean = nutrf,se_mean = SE, df_mean = df)
+    res3 <- data.frame(diffi_wash) %>% mutate(marginal_mean = "WASH")
+    res4 <- data.frame(diffi_nutr) %>% mutate(marginal_mean = "Nutrition")
+    res5 <- left_join(res1,res3, join_by(marginal_mean))
+    res6 <- left_join(res2,res4, join_by(marginal_mean))
+    res  <- bind_rows(res5,res6) %>% mutate(pathogen = pathogen_list[ii])
+    return(res)
+    
+}
+
+#-------------------------
+# separate out the marginal
+# means from the contrasts
+#-------------------------
+marg_means_v2 <- marg_effects_v2 %>%
+  mutate(visit = 2) %>%
+  select(pathogen, visit, marginal_mean, emmean, se_mean, df_mean, min95=lower.CL, max95 = upper.CL)
+
+marg_diff_v2 <- marg_effects_v2 %>%
+  mutate(visit = 2) %>%
+  filter(!is.na(contrast)) %>%
+  select(pathogen, visit, contrast, estimate, se=SE, df, t_val = t.ratio, p_value = p.value) %>%
+  mutate(min95 = estimate - 1.96*se, max95 = estimate + 1.96*se)
+
+#------------------------------
+# create formatted RD estimates
+#------------------------------
+marg_diff_ests <- marg_diff_v2 %>%
+    mutate(
+      rd = estimate*100,
+      rd_print =  paste0(sprintf("%1.1f",estimate*100)," (",sprintf("%1.1f",min95*100),", ",sprintf("%1.1f",max95*100),")"  )
+    )
+
+```
+
+## Table 3. Marginal seropositivity (mean and 95% CI) and marginal differences
+
+```{r}
+# -------------------------
+# 1) Build mean (95% CI) strings and pivot wide
+# -------------------------
+means_wide <- marg_means_v2 %>%
+  mutate(
+    pathogen = factor(pathogen, levels = pathogen_list),
+    mean_ci = paste0(
+      sprintf("%.1f", 100*emmean), "% (",
+      sprintf("%.1f", 100*min95), ", ",
+      sprintf("%.1f", 100*max95), ")"
+    )
+  ) %>%
+  select(pathogen, marginal_mean, mean_ci) %>%
+  mutate(
+    marginal_mean = recode(
+      marginal_mean,
+      "WASH" = "Combined WASH",
+      "No WASH" = "No WASH",
+      "Nutrition" = "Combined Nutrition",
+      "No Nutrition" = "No Nutrition"
+    )
+  ) %>%
+  pivot_wider(names_from = marginal_mean, values_from = mean_ci) %>%
+  arrange(pathogen)
+
+# -------------------------
+# Build difference (95% CI) + p-value strings and pivot wide
+# -------------------------
+diff_wide <- marg_diff_v2 %>%
+  mutate(
+    pathogen = factor(pathogen, levels = pathogen_list),
+    domain = case_when(
+      str_detect(contrast, "WASH") ~ "WSH",
+      str_detect(contrast, "Nutrition") ~ "Nutrition",
+      TRUE ~ "Other"
+    ),
+    diff_ci = paste0(
+      sprintf("%.1f", 100*estimate), " (",
+      sprintf("%.1f", 100*min95), ", ",
+      sprintf("%.1f", 100*max95), ")"
+    ),
+    p_fmt = sprintf("%.2f", p_value)
+  ) %>%
+  select(pathogen, domain, diff_ci, p_fmt) %>%
+  pivot_wider(
+    names_from = domain,
+    values_from = c(diff_ci, p_fmt),
+    names_glue = "{domain}_{.value}"
+  ) %>%
+  arrange(pathogen)
+
+# -------------------------
+# Combine into one final table
+# -------------------------
+tab_v2 <- means_wide %>%
+  left_join(diff_wide, by = "pathogen") %>%
+  mutate(pathogen = as.character(pathogen)) %>%
+  select(
+    pathogen,
+    `No WASH`, `Combined WASH`, WSH_diff_ci, WSH_p_fmt,
+    `No Nutrition`, `Combined Nutrition`, Nutrition_diff_ci, Nutrition_p_fmt
+  ) %>%
+  rename(
+    `WSH diff (95% CI)` = WSH_diff_ci,
+    `WSH p value` = WSH_p_fmt,
+    `Nutrition diff (95% CI)` = Nutrition_diff_ci,
+    `Nutrition p value` = Nutrition_p_fmt
+  )
+
+# -------------------------
+# Print table
+# -------------------------
+tab_v2 %>%
+  kbl(
+    booktabs = TRUE,
+    align = c("l", rep("c", ncol(tab_v2) - 1)),
+    caption = "Marginal seropositivity (mean and 95% CI) and marginal differences at 12 months"
+  ) %>%
+  add_header_above(c(
+    " " = 1,
+    "WSH main effect (marginal)" = 4,
+    "Nutrition main effect (marginal)" = 4
+  )) %>%
+  kable_classic(full_width = FALSE, html_font = "Times") %>%
+  column_spec(1, bold = TRUE, border_right = TRUE) %>%  # after pathogen
+  column_spec(5, border_right = TRUE) %>%               # after WSH block
+  row_spec(seq(2, nrow(tab_v2), by = 2), background = "#f7f7f7") %>%
+  scroll_box(width = "100%", height = "500px")
+
+saveRDS(tab_v2, here("output", "washbb-marginal-effects-12m.rds"))
+write_csv(tab_v2, here("output", "washbb-marginal-effects-12m.csv"))
+```
+
+
+# Permutation-based p-values
+
+- Estimate 2-sided permutation P-values by permuting treatment assignments within matched blocks (10,006 replicates) and using the regression coefficients for WSH and Nutrition as test statistics. 
+- We will additionally report P-values adjusted for multiple testing, controlling the false discovery rate using a Benjamini-Hochberg correction for the 12 comparisons.  
+
+```{r}
+#---------------------------
+# permute treatment (no need to be within block here)
+#---------------------------
+set.seed(12345)
+npermute <- 10006
+# get the unique list of blocks/clusters/tx
+cl_tx <- d1 %>%
+  select(block,clusterid,tr) %>%
+  distinct() %>%
+  # group_by(block) %>%
+  mutate(tx=as.character(tr))
+# create permuted assignments, conditional on block
+perm_mat <- matrix(nrow=nrow(cl_tx),ncol=npermute)
+for(i in 1:npermute) {
+  cl_txi <- cl_tx %>% mutate(txi = sample(tx,replace=FALSE))
+  perm_mat[,i] <- cl_txi$txi
+}
+
+#---------------------------
+# loop over pathogens and
+# permuted randomizations
+#---------------------------
+# make a small dataset for the permutation loop
+# to keep it lean
+d_pathogen_perm <- d1 %>%
+  filter(visit==2) %>%
+  select(pathogenf,block,clusterid,seropos)
+
+start_time <- Sys.time()
+permute_dist <- foreach(pathi = pathogen_list, .combine=rbind ) %dopar% {
+  di <- d_pathogen_perm %>% filter(pathogenf == pathi)
+  
+  foreach(permi = 1:npermute, .combine = rbind) %do% {
+    dij <- di %>%
+      left_join(data.frame(clusterid=cl_tx$clusterid,tr_perm=perm_mat[,permi]),join_by(clusterid))
+    dij$wsh_perm  = ifelse(dij$tr_perm %in% c("WSH","Nutrition + WSH"), 1, 0)
+    dij$nutr_perm = ifelse(dij$tr_perm %in% c("Nutrition","Nutrition + WSH"), 1, 0)
+    #fiti <- lm(seropos ~ wsh_perm + nutr_perm + factor(block), data = dij)
+    fiti <- lm(seropos ~ wsh_perm + nutr_perm , data = dij)
+    coefs <- coef(fiti)
+    res <- data.frame(pathogen=pathi,permute_n=permi,wash=coefs[2],nutr=coefs[3])
+  }
+}
+end_time <- Sys.time()
+cat("\nThe permutation test took:\n")
+```
+
+The permutation test took:
+```{r}
+difftime(end_time,start_time)
+```
+
+
+```{r}
+#---------------------------
+# join on observed values
+#---------------------------
+ests_obs <- marg_diff_ests %>%
+  select(pathogen, contrast, estimate) %>%
+  mutate(contrast2 = ifelse(contrast == "WASH - No WASH","wash","nutr")) %>%
+  select(pathogen,contrast2,estimate) %>%
+  pivot_wider(id_cols = pathogen, names_from = "contrast2", values_from = "estimate") %>%
+  rename(wash_obs = wash, nutr_obs = nutr)
+
+permute_dist2 <- permute_dist %>%
+  left_join(ests_obs, join_by(pathogen))
+
+#---------------------------
+# estimate permutation p-values
+#---------------------------
+permute_dist3 <- permute_dist2 %>%
+  group_by(pathogen) %>%
+  mutate(p_wash = mean(abs(wash) >= abs(wash_obs),  na.rm = TRUE),
+         p_nutr = mean(abs(nutr) >= abs(nutr_obs),  na.rm = TRUE)
+         ) %>%
+  mutate(pathogen = factor(pathogen, levels = pathogen_list)) 
+
+
+#---------------------------
+# plot the permutation distributions
+# WASH v No WASH
+#---------------------------
+p_annotation_df <- permute_dist3 %>%
+  select(pathogen, p_wash, p_nutr) %>%
+  group_by(pathogen) %>% slice(1) %>%
+  mutate(
+    p_wash_print = paste0("P = ",sprintf("%1.3f",p_wash)),
+    p_nutr_print = paste0("P = ",sprintf("%1.3f",p_nutr)),
+    x_print = 0, y_print = 700
+  )
+  
+plot_permute_dists_wash <- ggplot(data = permute_dist3, aes(x = wash)) +
+  facet_wrap(.~pathogen,ncol=3, scales = "free") + 
+  geom_histogram(bins=50,alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = wash_obs), lty="dashed") +
+  geom_text(data=p_annotation_df, aes(x=x_print,y=y_print,label = p_wash_print)) +
+  labs(title = "Permutation P-values, effect of WASH", y="permutations",x="permutation null distribution (WASH - No WASH)") +
+  coord_cartesian(ylim=c(0,800)) + 
+  theme_minimal()
+
+plot_permute_dists_wash
+
+#---------------------------
+# plot the permutation distributions
+# Nutrition v No Nutrition
+#---------------------------
+
+plot_permute_dists_nutr <- ggplot(data = permute_dist3, aes(x = nutr)) +
+  facet_wrap(.~pathogen,ncol=3, scales = "free") + 
+  geom_histogram(bins=50,alpha=0.5,color=NA) +
+  geom_vline(aes(xintercept = nutr_obs), lty="dashed") +
+  geom_text(data=p_annotation_df, aes(x=x_print,y=y_print,label = p_nutr_print)) +
+  labs(title = "Permutation P-values, effect of Nutrition", y="permutations",x="permutation null distribution (Nutrition - No Nutrition)") +
+  coord_cartesian(ylim=c(0,800)) + 
+  theme_minimal()
+
+plot_permute_dists_nutr
+```
+
+
+# Calculate FDR adjusted p-values
+
+- Apply Benjamini-Hochberg correction across all 12 pathogens for the WASH permutation p-values and separately across all 12 pathogens for the Nutrition permutation p-values.
+
+```{r}
+#---------------------------
+# calculate FDR-adj p-values
+# across all 12 pathogens
+#---------------------------
+options(knitr.kable.NA = '')
+
+p_fdr <- permute_dist3 %>%
+  select(pathogen, p_wash, p_nutr) %>%
+  distinct() %>%
+  ungroup() %>%
+  mutate(pathogen = factor(pathogen, levels = pathogen_list)) %>%
+  arrange(pathogen) %>%
+  mutate(
+    p_wash_fdr = p.adjust(p_wash, method = "BH"),
+    p_nutr_fdr = p.adjust(p_nutr, method = "BH")
+  ) %>%
+  select(pathogen, p_wash, p_wash_fdr, p_nutr, p_nutr_fdr)
+
+kbl(
+  p_fdr,
+  digits = 3,
+  caption = "Permutation p-values and Benjamini-Hochberg corrected p-values, secondary analysis"
+)
+
+saveRDS(p_fdr, here("output", "washbb-perm_fdr_pval-12m.rds"))
+write_csv(p_fdr, here("output", "washbb-perm_fdr_pval-12m.csv"))
+```
+
+# Conditional effects
+
+Per the SAP, test for additive interaction between WSH and Nutrition interventions. If there is no evidence for additive interaction between WSH and Nutrition interventions (P>0.1), our primary analysis will combine arms.
+
+```{r}
+#| label: test for interaction
+#-------------------------
+# include interaction term
+# conditional effect
+#-------------------------
+cond_res_list <- foreach(ii = seq_along(pathogen_list)) %do% {
+  di <- d1 %>%
+    filter(visit == 2, pathogenf == pathogen_list[ii])
+
+  fiti <- glm(
+    seropos ~ wshf * nutrf,
+    data = di,
+    family = gaussian(link = "identity")
+  )
+
+  vcov_cl <- sandwich::vcovCL(fiti, cluster = di$clusterid)
+  fiti_rb <- lmtest::coeftest(fiti, vcov = vcov_cl)
+
+  p_int <- fiti_rb["wshfWASH:nutrfNutrition", 4]
+
+  p_df <- data.frame(
+    pathogen = pathogen_list[ii],
+    p_int = p_int
+  )
+
+  if (!is.na(p_int) && p_int < 0.1) {
+    print(paste0(pathogen_list[ii], ": Pval = ", round(p_int, 3)))
+
+    musi_i <- emmeans(fiti, ~ wshf + nutrf, vcov = vcov_cl) %>%
+      regrid(type = "response")
+
+    contrasts <- contrast(
+      musi_i,
+      method = list(
+        "WASH vs Control" = c(-1, 1, 0, 0),
+        "Nutrition vs Control" = c(-1, 0, 1, 0),
+        "WASH+N vs Control" = c(-1, 0, 0, 1)
+      )
+    )
+
+    contrasts_df <- as.data.frame(summary(contrasts, infer = c(TRUE, TRUE))) %>%
+      mutate(pathogen = pathogen_list[ii])
+
+    diffi_i <- pairs(musi_i, simple = "each")
+
+    musi_df <- as.data.frame(musi_i) %>%
+      mutate(pathogen = pathogen_list[ii])
+    diffi_df <- as.data.frame(diffi_i) %>%
+      mutate(pathogen = pathogen_list[ii])
+
+    return(list(
+      p_df = p_df,
+      musi_df = musi_df,
+      diffi_df = diffi_df,
+      contrast_df = contrasts_df
+    ))
+  }
+
+  list(p_df = p_df, musi_df = NULL, diffi_df = NULL, contrast_df = NULL)
+}
+
+pvals_df <- bind_rows(lapply(cond_res_list, `[[`, "p_df")) %>%
+  mutate(
+    p_int = signif(p_int, 3),
+    sig = ifelse(p_int < 0.1, "Yes", "No")
+  )
+
+sig_musi_df <- bind_rows(lapply(cond_res_list, `[[`, "musi_df")) %>%
+  select(pathogen, wshf, nutrf, emmean, SE, min95 = lower.CL, max95 = upper.CL) %>%
+  mutate(
+    wshf = factor(wshf, levels = c("No WASH", "WASH")),
+    nutrf = factor(nutrf, levels = c("No Nutrition", "Nutrition")),
+    group = interaction(wshf, nutrf, sep = " + ")
+  )
+
+sig_diffi_df <- bind_rows(lapply(cond_res_list, `[[`, "diffi_df")) %>%
+  select(nutrf, wshf, pathogen, contrast, estimate, SE, p.value)
+
+sig_contrast_df <- bind_rows(lapply(cond_res_list, `[[`, "contrast_df")) %>%
+  select(pathogen, contrast, estimate, SE, p.value, min95 = lower.CL, max95 = upper.CL)
+
+interaction_pathogens <- sig_contrast_df %>%
+  distinct(pathogen) %>%
+  pull(pathogen) %>%
+  as.character()
+
+saveRDS(sig_contrast_df, here("output", "washbb-contrasts-effects-12m.rds"))
+write_csv(sig_contrast_df, here("output", "washbb-contrasts-effects-12m.csv"))
+
+saveRDS(sig_diffi_df, here("output", "washbb-conditional-effects-12m.rds"))
+write_csv(sig_diffi_df, here("output", "washbb-conditional-effects-12m.csv"))
+```
+
+## Table 4. Estimated means by WSH and Nutrition for pathogens with evidence of additive interaction
+
+```{r}
+sig_musi_df %>%
+  mutate(
+    est = paste0(
+      round(emmean, 3),
+      " (",
+      round(min95, 3), ", ",
+      round(max95, 3), ")"
+    )
+  ) %>%
+  select(pathogen, wshf, nutrf, est) %>%
+  kable(
+    format = "html",
+    digits = 3,
+    caption = "Estimated means by WSH and Nutrition for pathogens with evidence of additive interaction"
+  ) %>%
+  kable_classic(full_width = FALSE, html_font = "Times")
+```
+
+```{r}
+interaction_mean_plots <- sig_musi_df %>%
+  split(.$pathogen) %>%
+  map(~ {
+    ggplot(.x, aes(x = emmean, y = group)) +
+      geom_point(size = 2, color = cbpal[3]) +
+      geom_errorbar(
+        aes(xmin = min95, xmax = max95),
+        width = 0.15,
+        linewidth = 0.8,
+        color = cbpal[3]
+      ) +
+      labs(
+        title = unique(.x$pathogen),
+        x = "Intervention group",
+        y = "Mean seroprevalence"
+      ) +
+      theme_minimal() +
+      theme(legend.position = "top")
+  })
+
+walk(interaction_mean_plots, print)
+```
+
+## Table 5. Pairwise contrasts for pathogens with evidence of additive interaction
+
+```{r}
+sig_contrast_df %>%
+  mutate(est_ci = sprintf("%.3f (%.3f, %.3f)", estimate, min95, max95)) %>%
+  select(pathogen, contrast, est_ci) %>%
+  kable(
+    format = "html",
+    col.names = c("Pathogen", "Contrast (vs Control)", "Estimate (95% CI)"),
+    caption = "Conditional effects vs Control (risk difference scale) for pathogens with evidence of additive interaction"
+  ) %>%
+  kable_classic(full_width = FALSE, html_font = "Times")
+
+interaction_contrast_plots <- sig_contrast_df %>%
+  split(.$pathogen) %>%
+  map(~ {
+    ggplot(
+      .x %>%
+        mutate(
+          contrast = factor(
+            contrast,
+            levels = c("WASH vs Control", "Nutrition vs Control", "WASH+N vs Control")
+          )
+        ),
+      aes(x = contrast, y = estimate)
+    ) +
+      geom_hline(yintercept = 0, linetype = 2) +
+      geom_point(size = 2, color = cbpal[4]) +
+      geom_errorbar(
+        aes(ymin = min95, ymax = max95),
+        width = 0.15,
+        linewidth = 0.8,
+        color = cbpal[4]
+      ) +
+      labs(
+        x = NULL,
+        y = "Risk difference vs Control",
+        title = unique(.x$pathogen)
+      ) +
+      coord_flip() +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 20, hjust = 1),
+        plot.title = element_text(face = "plain")
+      )
+  })
+
+walk(interaction_contrast_plots, print)
+```
+
+# Forest plot for presentation
+
+- For pathogens with evidence of additive interaction, report conditional means and effects in the updated forest plot.
+- For FDR in the manuscript dataset, use marginal permutation p-values for pathogens without interaction and interaction-consistent conditional p-values for pathogens with interaction, then adjust those 12 together within each intervention panel.
+
+## Build dataset for manuscript figure/table
+
+```{r}
+#--------------------------
+# manuscript-ready forest/table
+# dataset for the final figure
+#--------------------------
+format_pct_label <- function(x) {
+  ifelse(is.na(x), NA_character_, paste0(sprintf("%.1f", 100 * x), "%"))
+}
+
+format_pp_ci_label <- function(estimate, min95, max95) {
+  est_pp <- 100 * estimate
+  min_pp <- 100 * min95
+  max_pp <- 100 * max95
+
+  est_pp[abs(est_pp) < 0.05] <- 0
+  min_pp[abs(min_pp) < 0.05] <- 0
+  max_pp[abs(max_pp) < 0.05] <- 0
+
+  sprintf("%.1f (%.1f, %.1f)", est_pp, min_pp, max_pp)
+}
+
+wash_marginal_panel <- marg_means_v2 %>%
+  filter(marginal_mean %in% c("No WASH", "WASH")) %>%
+  select(pathogen, marginal_mean, emmean) %>%
+  pivot_wider(names_from = marginal_mean, values_from = emmean) %>%
+  left_join(
+    marg_diff_v2 %>%
+      filter(contrast == "WASH - No WASH") %>%
+      select(pathogen, estimate, min95, max95),
+    by = "pathogen"
+  ) %>%
+  left_join(
+    p_fdr %>%
+      select(pathogen, primary_p = p_wash),
+    by = "pathogen"
+  ) %>%
+  transmute(
+    pathogen,
+    intervention = "WASH",
+    effect_source = "marginal",
+    p_source = "marginal_permutation",
+    interaction_flag = FALSE,
+    group0_header = "No WASH",
+    group1_header = "WASH",
+    group0_mean = `No WASH`,
+    group1_mean = WASH,
+    estimate,
+    min95,
+    max95,
+    primary_p
+  )
+
+wash_conditional_panel <- sig_musi_df %>%
+  filter(nutrf == "No Nutrition") %>%
+  select(pathogen, wshf, emmean) %>%
+  pivot_wider(names_from = wshf, values_from = emmean) %>%
+  left_join(
+    sig_contrast_df %>%
+      filter(contrast == "WASH vs Control") %>%
+      select(pathogen, estimate, min95, max95, primary_p = p.value),
+    by = "pathogen"
+  ) %>%
+  transmute(
+    pathogen,
+    intervention = "WASH",
+    effect_source = "conditional",
+    p_source = "conditional_wash_vs_control_no_nutrition",
+    interaction_flag = TRUE,
+    group0_header = "No WASH",
+    group1_header = "WASH",
+    group0_mean = `No WASH`,
+    group1_mean = WASH,
+    estimate,
+    min95,
+    max95,
+    primary_p
+  )
+
+nutrition_marginal_panel <- marg_means_v2 %>%
+  filter(marginal_mean %in% c("No Nutrition", "Nutrition")) %>%
+  select(pathogen, marginal_mean, emmean) %>%
+  pivot_wider(names_from = marginal_mean, values_from = emmean) %>%
+  left_join(
+    marg_diff_v2 %>%
+      filter(contrast == "Nutrition - No Nutrition") %>%
+      select(pathogen, estimate, min95, max95),
+    by = "pathogen"
+  ) %>%
+  left_join(
+    p_fdr %>%
+      select(pathogen, primary_p = p_nutr),
+    by = "pathogen"
+  ) %>%
+  transmute(
+    pathogen,
+    intervention = "Nutrition",
+    effect_source = "marginal",
+    p_source = "marginal_permutation",
+    interaction_flag = FALSE,
+    group0_header = "No Nutrition",
+    group1_header = "Nutrition",
+    group0_mean = `No Nutrition`,
+    group1_mean = Nutrition,
+    estimate,
+    min95,
+    max95,
+    primary_p
+  )
+
+nutrition_conditional_panel <- sig_musi_df %>%
+  filter(wshf == "No WASH") %>%
+  select(pathogen, nutrf, emmean) %>%
+  pivot_wider(names_from = nutrf, values_from = emmean) %>%
+  left_join(
+    sig_contrast_df %>%
+      filter(contrast == "Nutrition vs Control") %>%
+      select(pathogen, estimate, min95, max95, primary_p = p.value),
+    by = "pathogen"
+  ) %>%
+  transmute(
+    pathogen,
+    intervention = "Nutrition",
+    effect_source = "conditional",
+    p_source = "conditional_nutrition_vs_control_no_wash",
+    interaction_flag = TRUE,
+    group0_header = "No Nutrition",
+    group1_header = "Nutrition",
+    group0_mean = `No Nutrition`,
+    group1_mean = Nutrition,
+    estimate,
+    min95,
+    max95,
+    primary_p
+  )
+
+wash_plot_panel <- bind_rows(
+  wash_marginal_panel %>% filter(!pathogen %in% interaction_pathogens),
+  wash_conditional_panel
+) %>%
+  mutate(pathogen = factor(pathogen, levels = pathogen_list)) %>%
+  arrange(pathogen) %>%
+  mutate(primary_p_fdr = p.adjust(primary_p, method = "BH"))
+
+nutrition_plot_panel <- bind_rows(
+  nutrition_marginal_panel %>% filter(!pathogen %in% interaction_pathogens),
+  nutrition_conditional_panel
+) %>%
+  mutate(pathogen = factor(pathogen, levels = pathogen_list)) %>%
+  arrange(pathogen) %>%
+  mutate(primary_p_fdr = p.adjust(primary_p, method = "BH"))
+
+forest_table_data_12m <- bind_rows(wash_plot_panel, nutrition_plot_panel) %>%
+  mutate(
+    pathogen = as.character(pathogen),
+    pathogen_display = ifelse(interaction_flag, paste0(pathogen, " *"), pathogen),
+    group0_label = format_pct_label(group0_mean),
+    group1_label = format_pct_label(group1_mean),
+    diff_label = format_pp_ci_label(estimate, min95, max95),
+    estimate_pp = 100 * estimate,
+    min95_pp = 100 * min95,
+    max95_pp = 100 * max95
+  ) %>%
+  select(
+    intervention,
+    pathogen,
+    pathogen_display,
+    interaction_flag,
+    effect_source,
+    p_source,
+    group0_header,
+    group1_header,
+    group0_mean,
+    group0_label,
+    group1_mean,
+    group1_label,
+    estimate,
+    min95,
+    max95,
+    estimate_pp,
+    min95_pp,
+    max95_pp,
+    diff_label,
+    primary_p,
+    primary_p_fdr
+  )
+
+saveRDS(forest_table_data_12m, here("output", "washbb-forest-plot-table-12m.rds"))
+write_csv(forest_table_data_12m, here("output", "washbb-forest-plot-table-12m.csv"))
+```
+
+## Final figure dataset at 12 months
+
+```{r}
+format_p_display <- function(x) {
+  case_when(
+    is.na(x) ~ NA_character_,
+    x < 0.001 ~ "<0.001",
+    TRUE ~ sprintf("%.3f", x)
+  )
+}
+
+forest_table_data_12m %>%
+  mutate(
+    effect_source = ifelse(effect_source == "conditional", "Conditional", "Marginal"),
+    primary_p_label = format_p_display(primary_p),
+    primary_p_fdr_label = format_p_display(primary_p_fdr)
+  ) %>%
+  select(
+    intervention,
+    pathogen_display,
+    effect_source,
+    group0_label,
+    group1_label,
+    diff_label,
+    primary_p_label,
+    primary_p_fdr_label
+  ) %>%
+  kable(
+    format = "html",
+    col.names = c(
+      "Panel",
+      "Pathogen",
+      "Effect Source",
+      "Control Mean",
+      "Intervention Mean",
+      "Difference (95% CI)",
+      "Primary p-value",
+      "FDR p-value"
+    ),
+    caption = "Final 12-month dataset used for the manuscript forest plot"
+  ) %>%
+  kable_classic(full_width = FALSE, html_font = "Times")
+```
+
+
+## WASH
+
+```{r}
+forest_plot_12m <- forest_table_data_12m %>%
+  mutate(
+    pathogen_display = factor(
+      pathogen_display,
+      levels = rev(ifelse(
+        pathogen_list %in% interaction_pathogens,
+        paste0(pathogen_list, " *"),
+        pathogen_list
+      ))
+    )
+  )
+
+forest_limit <- max(
+  8,
+  ceiling(max(abs(c(forest_plot_12m$min95_pp, forest_plot_12m$max95_pp))) / 2) * 2
+)
+x_text <- forest_limit + 0.8
+x_upper <- x_text + 1.6
+
+p_wash <- ggplot(
+  data = forest_plot_12m %>% filter(intervention == "WASH"),
+  aes(x = pathogen_display, y = estimate_pp)
+) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_errorbar(
+    aes(ymin = min95_pp, ymax = max95_pp),
+    width = 0.2,
+    color = cbpal_int[2]
+  ) +
+  geom_point(color = cbpal_int[2], size = 2) +
+  geom_text(
+    aes(y = x_text, label = diff_label, fontface = "bold"),
+    hjust = 0,
+    size = 3.3,
+    family = "Helvetica"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-forest_limit, forest_limit, by = 4),
+    limits = c(-forest_limit, x_upper)
+  ) +
+  labs(
+    y = "Risk Difference, WASH - No WASH",
+    x = "",
+    caption = "* Evidence for interaction between WASH and Nutrition. Conditional means and effects are reported for pathogens with evidence of additive interaction (WASH vs Control)."
+  ) +
+  coord_flip(clip = "off") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(5.5, 60, 5.5, 5.5)
+  )
+
+p_wash
+
+ggsave(
+  filename = here("output", "washbb-rd-forest-plot-wash-12m.jpg"),
+  plot = p_wash,
+  width = 200,
+  height = 120,
+  units = "mm"
+)
+ggsave(
+  filename = here("output", "washbb-rd-forest-plot-wash-12m.png"),
+  plot = p_wash,
+  width = 200,
+  height = 120,
+  units = "mm"
+)
+```
+
+## Nutrition
+
+```{r}
+p_nutr <- ggplot(
+  data = forest_plot_12m %>% filter(intervention == "Nutrition"),
+  aes(x = pathogen_display, y = estimate_pp)
+) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_errorbar(
+    aes(ymin = min95_pp, ymax = max95_pp),
+    width = 0.2,
+    color = cbpal_int[3]
+  ) +
+  geom_point(color = cbpal_int[3], size = 2) +
+  geom_text(
+    aes(y = x_text, label = diff_label, fontface = "bold"),
+    hjust = 0,
+    size = 3.3,
+    family = "Helvetica"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-forest_limit, forest_limit, by = 4),
+    limits = c(-forest_limit, x_upper)
+  ) +
+  labs(
+    y = "Risk Difference, Nutrition - No Nutrition",
+    x = "",
+    caption = "* Evidence for interaction between WASH and Nutrition. Conditional means and effects are reported for pathogens with evidence of additive interaction (Nutrition vs Control)."
+  ) +
+  coord_flip(clip = "off") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(5.5, 60, 5.5, 5.5)
+  )
+
+p_nutr
+
+ggsave(
+  filename = here("output", "washbb-rd-forest-plot-nutr-12m.jpg"),
+  plot = p_nutr,
+  width = 200,
+  height = 120,
+  units = "mm"
+)
+ggsave(
+  filename = here("output", "washbb-rd-forest-plot-nutr-12m.png"),
+  plot = p_nutr,
+  width = 200,
+  height = 120,
+  units = "mm"
+)
+```
+
+# Session
+
+```{r}
+sessionInfo()
+```
+
