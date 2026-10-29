@@ -1,0 +1,513 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "Count of seropositive enteric pathogens"
+author: "Pearl Ante-Testard (pearl.ante@ucsf.edu), Julianna Colado"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+# Preamble
+
+```{r}
+#| label: preamble
+#| message: false
+#----------------------------
+# clean environment
+#----------------------------
+rm(list=ls(all=TRUE))
+#----------------------------
+# source the config file
+#----------------------------
+library(here)
+source(here("R","0-config.R"))
+options(knitr.kable.NA = '-')
+```
+
+# Read in the data
+
+```{r}
+d1 <- read_rds(file = here("../../data/bangl/luminex/final/",
+                           "washb_bangl_luminex_igg_seropos_pathogen_2026-01-29.rds")) %>%
+  # final visit only
+  filter(visit == 3) %>%
+#  left_join(tx, by = join_by(clusterid)) %>%
+  filter(!is.na(tr)) %>%
+  # Indicatior for WSH and Nutrition interventions
+  mutate(wsh = ifelse(tr %in% c("WSH","Nutrition + WSH"), 1, 0), 
+         nutr = ifelse(tr %in% c("Nutrition","Nutrition + WSH"), 1, 0),
+         wshf = ifelse(wsh==1,"WASH","No WASH"),
+         nutrf = ifelse(nutr==1,"Nutrition","No Nutrition"),
+         wshf = factor(wshf, levels=c("No WASH","WASH")),
+         nutrf = factor(nutrf, levels=c("No Nutrition","Nutrition")))
+```
+
+# Count of seropositive enteric pathogens
+
+From SAP:
+
+- Summarize the distribution of the number of seropositive pathogens (range 0–12) by treatment group at the final visit among all measured children.
+
+
+```{r}
+#| label: child-level count outcome
+
+d_count <- d1 %>%
+  group_by(block, clusterid, tr, childid, wsh, nutr, wshf, nutrf) %>%
+  summarise(
+    count_seropos = sum(seropos, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Quick check: range should be 0–12
+d_count %>% summarise(min = min(count_seropos), max = max(count_seropos))
+
+```
+
+
+
+```{r seropos counts by treatment arm wash}
+# select relevant columns for histogram
+d_count_plot <- d_count %>%
+  select(childid, wshf, count_seropos)
+
+# group by treatment arm and seropos count, and count # children with each seropos count per treatment arm
+d_count_hist1 <- d_count_plot %>%
+  group_by(wshf, count_seropos) %>%
+  summarize(
+    nobs = n(),
+    .groups = "drop"
+  )
+
+# add columns 
+# tot: total # children in each treatment arm 
+# pct: percentage with seropos count per treatment arm
+d_count_hist2 <- d_count_hist1 %>%
+  group_by(wshf) %>%
+  mutate(
+    tot = sum(nobs),
+    pct = nobs / tot 
+  ) %>%
+  ungroup()
+
+# fill in missing count values so the bars align
+d_count_hist3 <- d_count_hist2 %>%
+  tidyr::expand(wshf, count_seropos = full_seq(count_seropos, 1)) %>%
+  left_join(d_count_hist2, by = c("wshf", "count_seropos")) %>%
+  mutate(
+    nobs = ifelse(is.na(nobs), 0, nobs),
+    pct  = ifelse(is.na(pct), 0, pct)
+  )
+
+
+#create histogram
+set.seed(123456)
+x_breaks <- seq(0, max(d_count_hist3$count_seropos, na.rm = TRUE), by = 1)
+x_limits <- c(min(x_breaks) - 0.5, max(x_breaks) + 0.5)
+
+# group means (unadjusted, raw) to fold into the legend labels
+# and report the raw between-group difference as a caption
+grp_means_wsh <- d_count_plot %>%
+  group_by(wshf) %>%
+  summarise(mean_seropos = mean(count_seropos), n = n(), .groups = "drop") %>%
+  arrange(wshf)
+
+diff_wsh <- diff(grp_means_wsh$mean_seropos)  # WASH - No WASH (raw, unadjusted)
+
+legend_labels_wsh <- with(grp_means_wsh, paste0(wshf, " (mean = ", round(mean_seropos, 2), ")"))
+
+hist_count_seropos_wsh <- ggplot(data = d_count_hist3, aes(x = count_seropos, y = pct, fill = wshf)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = cbpal_int[c(4,2)], labels = legend_labels_wsh) +
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "Number of seropositive pathogens detected",
+    y = "% children in each treatment group",
+    fill = "Treatment group",
+    tag = "A",
+    caption = paste0("Mean difference (WASH − No WASH): ", round(diff_wsh, 2))
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    plot.margin = margin(5, 5, 5, 5)
+  )
+
+
+
+#create boxplot
+plot_bottom <- ggplot(data = d_count_plot, aes(x = count_seropos, y = wshf, color = wshf)) +
+  geom_jitter(height = 0.1, width = 0.2, alpha = 0.4) +
+  geom_boxplot(outlier.shape = NA, color = "black", fill = NA, width = 0.4) +
+  scale_color_manual(values = cbpal_int[c(4,2)]) + 
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  labs(
+    x = NULL,
+    y = NULL,
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(5, 5, 5, 5)
+  )
+
+
+
+#stack histogram and boxplot
+final_plot <- hist_count_seropos_wsh / plot_bottom + plot_layout(heights = c(2, 1))
+
+final_plot
+
+```
+
+
+```{r seropos counts by treatment arm nutr}
+# select relevant columns for histogram
+d_count_plot2 <- d_count %>%
+  select(childid, nutrf, count_seropos)
+
+# group by treatment arm and seropos count, and count # children with each seropos count per treatment arm
+d_count_hist1n <- d_count_plot2 %>%
+  group_by(nutrf, count_seropos) %>%
+  summarize(
+    nobs = n(),
+    .groups = "drop"
+  )
+
+# add columns 
+# tot: total # children in each treatment arm 
+# pct: percentage with seropos count per treatment arm
+d_count_hist2n <- d_count_hist1n %>%
+  group_by(nutrf) %>%
+  mutate(
+    tot = sum(nobs),
+    pct = nobs / tot 
+  ) %>%
+  ungroup()
+
+# fill in missing count values so the bars align
+d_count_hist3n <- d_count_hist2n %>%
+  tidyr::expand(nutrf, count_seropos = full_seq(count_seropos, 1)) %>%
+  left_join(d_count_hist2n, by = c("nutrf", "count_seropos")) %>%
+  mutate(
+    nobs = ifelse(is.na(nobs), 0, nobs),
+    pct  = ifelse(is.na(pct), 0, pct)
+  )
+
+
+#create histogram
+set.seed(123456)
+x_breaks <- seq(0, max(d_count_hist3n$count_seropos, na.rm = TRUE), by = 1)
+x_limits <- c(min(x_breaks) - 0.5, max(x_breaks) + 0.5)
+
+# group means (unadjusted, raw) to fold into the legend labels
+# and report the raw between-group difference as a caption
+grp_means_nutr <- d_count_plot2 %>%
+  group_by(nutrf) %>%
+  summarise(mean_seropos = mean(count_seropos), n = n(), .groups = "drop") %>%
+  arrange(nutrf)
+
+diff_nutr <- diff(grp_means_nutr$mean_seropos)  # Nutrition - No Nutrition (raw, unadjusted)
+
+legend_labels_nutr <- with(grp_means_nutr, paste0(nutrf, " (mean = ", round(mean_seropos, 2),")"))
+
+hist_count_seropos_nutr <- ggplot(data = d_count_hist3n, aes(x = count_seropos, y = pct, fill = nutrf)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  scale_fill_manual(values = cbpal_int[c(4,3)], labels = legend_labels_nutr) +
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    x = "Number of seropositive pathogens detected",
+    y = "% children in each treatment group",
+    fill = "Treatment group",
+    tag = "B",
+    caption = paste0("Mean difference (Nutrition − No Nutrition): ", round(diff_nutr, 2))
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    plot.margin = margin(5, 5, 5, 5)
+  )
+
+
+
+#create boxplot
+plot_bottom_nutr <- ggplot(data = d_count_plot2, aes(x = count_seropos, y = nutrf, color = nutrf)) +
+  geom_jitter(height = 0.1, width = 0.2, alpha = 0.4) +
+  geom_boxplot(outlier.shape = NA, color = "black", fill = NA, width = 0.4) +
+  scale_color_manual(values = cbpal_int[c(4,3)]) + 
+  scale_x_continuous(breaks = x_breaks, limits = x_limits) +
+  labs(
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(5, 5, 5, 5)
+  )
+
+
+
+# stack histogram and boxplot
+final_plot_nutr <- hist_count_seropos_nutr / plot_bottom_nutr + plot_layout(heights = c(2, 1))
+
+final_plot_nutr
+
+```
+
+
+```{r combined wsh and nutr}
+
+comb_plot_wsh_nutr <- final_plot | final_plot_nutr 
+
+comb_plot_wsh_nutr
+
+ggsave(
+  filename = here("output", "washbb-count-wsh-nutr-24months.png"),
+  plot = comb_plot_wsh_nutr,
+  width = 260,
+  height = 120,
+  units = "mm"
+)
+
+```
+
+## Descriptive summaries by treatment group
+
+```{r}
+#| label: descriptive summaries by arm
+summ_by_arm <- d_count %>%
+  group_by(tr) %>%
+  summarise(
+    n_children = n(),
+    mean = round(mean(count_seropos),2),
+    sd = round(sd(count_seropos),2),
+    median = median(count_seropos),
+    p25 = quantile(count_seropos, 0.25),
+    p75 = quantile(count_seropos, 0.75),
+    min = min(count_seropos),
+    max = max(count_seropos),
+    .groups = "drop"
+  )
+
+
+summ_by_arm %>%
+  arrange(tr) %>%
+  kable(
+    format = "html",
+    caption = "Distribution of number of seropositive enteric pathogens at 24 months by arm",
+    col.names = c(
+      "Treatment group",
+      "N children",
+      "Mean",
+      "SD",
+      "Median",
+      "25th percentile",
+      "75th percentile",
+      "Min",
+      "Max"
+    ),
+    align = "lcccccccc"
+  ) %>%
+   kable_classic(full_width = FALSE, html_font = "Times")
+
+
+summ_by_wsh <- d_count %>%
+  group_by(wshf) %>%
+  summarise(
+    n_children = n(),
+    mean = round(mean(count_seropos),2),
+    sd = round(sd(count_seropos),2),
+    median = median(count_seropos),
+    p25 = quantile(count_seropos, 0.25),
+    p75 = quantile(count_seropos, 0.75),
+    min = min(count_seropos),
+    max = max(count_seropos),
+    .groups = "drop"
+  )
+
+
+summ_by_wsh %>%
+  arrange(wshf) %>%
+  kable(
+    format = "html",
+    caption = "Distribution of number of seropositive enteric pathogens at 24 months by WASH",
+    col.names = c(
+      "Treatment group",
+      "N children",
+      "Mean",
+      "SD",
+      "Median",
+      "25th percentile",
+      "75th percentile",
+      "Min",
+      "Max"
+    ),
+    align = "lcccccccc"
+  ) %>%
+   kable_classic(full_width = FALSE, html_font = "Times")
+
+summ_by_nutr <- d_count %>%
+  group_by(nutrf) %>%
+  summarise(
+    n_children = n(),
+    mean = round(mean(count_seropos),2),
+    sd = round(sd(count_seropos),2),
+    median = median(count_seropos),
+    p25 = quantile(count_seropos, 0.25),
+    p75 = quantile(count_seropos, 0.75),
+    min = min(count_seropos),
+    max = max(count_seropos),
+    .groups = "drop"
+  )
+
+
+summ_by_nutr %>%
+  arrange(nutrf) %>%
+  kable(
+    format = "html",
+    caption = "Distribution of number of seropositive enteric pathogens at 24 months by nutrition status",
+    col.names = c(
+      "Treatment group",
+      "N children",
+      "Mean",
+      "SD",
+      "Median",
+      "25th percentile",
+      "75th percentile",
+      "Min",
+      "Max"
+    ),
+    align = "lcccccccc"
+  ) %>%
+   kable_classic(full_width = FALSE, html_font = "Times")
+```
+
+## Histogram by treatment arm (4 arms)
+
+```{r}
+ggplot(d_count, aes(x = count_seropos)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    binwidth = 1,
+    boundary = -0.5,
+    closed = "left",
+    fill = "grey80",
+    color = "white"
+  ) +
+  facet_wrap(~ tr, nrow = 2) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+    x = "Number of seropositive enteric pathogens",
+    y = "Density",
+    title = "Distribution of seropositive enteric pathogen counts at 24 months",
+    subtitle = "By treatment arm"
+  ) +
+  theme_minimal()
+
+
+```
+
+## Histogram by marginal arms (WASH / Nutrition)
+
+```{r}
+ggplot(d_count, aes(x = count_seropos)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    binwidth = 1,
+    boundary = -0.5,
+    closed = "left",
+    fill = "grey80",
+    color = "white"
+  ) +
+  facet_wrap(~ wshf) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+    x = "Number of seropositive enteric pathogens",
+    y = "Number of children",
+    title = "Distribution of seropositive enteric pathogen counts at 24 months",
+    subtitle = "By WASH intervention status"
+  ) +
+  theme_minimal(base_size = 12)
+
+ggplot(d_count, aes(x = count_seropos)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    binwidth = 1,
+    boundary = -0.5,
+    closed = "left",
+    fill = "grey80",
+    color = "white"
+  ) +
+  facet_wrap(~ nutrf) +
+  scale_x_continuous(breaks = 0:12) +
+  labs(
+    x = "Number of seropositive enteric pathogens",
+    y = "Number of children",
+    title = "Distribution of seropositive enteric pathogen counts at 24 months",
+    subtitle = "By nutrition intervention status"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+
+# Estimate between-group differences using linear regression of the count outcome
+
+- Linear regression with WSH, Nutrition, interaction, matched blocks
+
+```{r}
+#| label: test for interaction and fit regression
+#----------------------------
+# Fit interaction model first
+#----------------------------
+fit_int <- lm(count_seropos ~ wsh * nutr + factor(block), data = d_count)
+V_int   <- sandwich::vcovCL(fit_int, cluster = d_count$clusterid)
+ct_int  <- lmtest::coeftest(fit_int, vcov. = V_int)
+
+p_int <- ct_int["wsh:nutr", "Pr(>|t|)"]
+cat("p-val for interaction:", p_int)
+#----------------------------------------------
+# Decide final model based on interaction test
+# No interaction here
+#----------------------------------------------
+if (!is.na(p_int) && p_int > 0.1) {
+  fit <- lm(count_seropos ~ wshf + nutrf + factor(block), data = d_count)
+} else {
+  # If you prefer to still report marginal means even with interaction,
+  # keep interaction but with factors (so emmeans works cleanly)
+  fit<- lm(count_seropos ~ wshf * nutrf + factor(block), data = d_count)
+}
+
+v_final <- sandwich::vcovCL(fit, cluster = d_count$clusterid)
+
+#----------------------------------------------
+# Marginal means (WASH / Nutrition margins)
+#----------------------------------------------
+m_wash <- emmeans(fit, ~ wshf,  vcov = v_final)
+m_nutr <- emmeans(fit, ~ nutrf, vcov = v_final)
+
+m_wash
+m_nutr
+#----------------------------------------------
+# Marginal contrasts (differences)
+#----------------------------------------------
+d_wash <- pairs(m_wash, reverse = TRUE)
+d_nutr <- pairs(m_nutr, reverse = TRUE)
+d_wash
+d_nutr
+```
+
