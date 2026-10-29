@@ -1,0 +1,345 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "Baseline balance table (Control, Nutrition, WSH, Nutrition + WSH)"
+author: "Pearl Ante-Testard (pearl.ante@ucsf.edu)"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+  #docx:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+
+# Preamble
+
+```{r preamble}
+#| label: preamble
+
+#----------------------------
+# clean environment
+#----------------------------
+rm(list=ls(all=TRUE))
+#----------------------------
+# source the config file
+#----------------------------
+library(here)
+here()
+source(here("R","0-config.R"))
+```
+
+# Read in the data
+
+```{r}
+#| label: load merged antibody and fake treatment data
+#| message: false 
+#-------------------------------
+# load the dataset
+# for WASH Benefits Bangladesh
+# baseline table should include individuals
+# included in the final visit
+#-------------------------------
+d1 <- read_rds(file = here("../../data/bangl/luminex/final/",
+                           "washb_bangl_luminex_igg_seropos_pathogen_2026-09-16.rds")) %>%
+  # final visit only
+  filter(visit == 3) %>%
+  distinct(clusterid, tr, childid, eed, dob) %>%
+#  left_join(tx, by = join_by(clusterid)) %>%
+  filter(!is.na(tr)) %>%
+  # Indicatior for WSH and Nutrition interventions
+  mutate(wsh = ifelse(tr %in% c("WSH","Nutrition + WSH"), 1, 0), 
+         nutr = ifelse(tr %in% c("Nutrition","Nutrition + WSH"), 1, 0),
+         wshf = ifelse(wsh==1,"WASH","No WASH"),
+         nutrf = ifelse(nutr==1,"Nutrition","No Nutrition"),
+         wshf = factor(wshf, levels=c("No WASH","WASH")),
+         nutrf = factor(nutrf, levels=c("No Nutrition","Nutrition")))
+
+master_child <- read_csv("~/Library/CloudStorage/Box-Box/washb-serology/data/bangl/anthro/washb-bangladesh-anthro.csv") %>%
+#master_child <- read_csv("~/Library/CloudStorage/Box-Box/washb-serology/data/bangl/diarrhea/washb-bangladesh-diar.csv") %>%
+  mutate(childid2 = paste0("child-",dataid,"-",substr(childid,2,2))) %>%
+  select(dataid,clusterid,childid=childid2,sex) %>%
+  distinct() %>%
+  mutate(childid = as.character(childid)) 
+
+master_hh <- read_csv("~/Library/CloudStorage/Box-Box/washb-serology/data/bangl/baseline/washb-bangladesh-enrol.csv") %>%
+  select(dataid,clusterid,hhid,
+         # Maternal
+         momage, momedu, momeduy, momheight, #nulliparous,
+         # Paternal
+         dadeduy, dadagri,
+         # Household
+         Nhh, Ncomp, Nlt18, elec, floor, asset_mobile, asset_phone, asset_moto, roof, walls,
+         asset_radio, asset_tvbw, asset_tvcol, asset_tv, asset_refrig, asset_bike, asset_sewmach, 
+         asset_wardrobe, asset_table, asset_chair, asset_clock, asset_khat, asset_chouki, 
+         # Drinking water
+         tubewell, watmin, storewat, treatwat,
+         # Sanitation
+         latown, latslab, latseal, latfeces, potty, humfeces, humfecesch,
+         # Handwashing location
+         hwlat, hwlatwat, hwlatsoap, hwkit, hwkitwat, hwkitsoap, hwsw, hwss, hwsws,
+         # Food security
+         hfiacat
+         ) 
+
+iwi_df <- read_rds(file = here("../../data/iwi/",
+                           "df_iwi_study.rds")) %>%
+  filter(study == "WASHB") %>%
+  rename(dataid = study_pid)
+
+d_tab1 <- d1 %>%
+  left_join(master_child, by = join_by(childid)) %>%
+  select(-c(clusterid.y)) %>%
+  select(clusterid=clusterid.x,tr,childid,dob,wsh,nutr,wshf,nutrf,dataid,sex) %>%
+  left_join(master_hh, by = c(join_by(dataid,clusterid))) %>%
+  left_join(iwi_df, by =join_by(dataid)) %>%
+  mutate(
+    across(where(is.labelled), ~ as_factor(.x, levels = "default"))
+  )
+
+
+```
+
+```{r}
+#| label: variable cleaning
+
+# Create categorical paternal education to be consistent with maternal education and binary hfias variable
+d_tab1 <- d_tab1 %>%
+  mutate(
+    dadedu = case_when(
+      dadeduy == 0 ~ "No education",
+      dadeduy >= 1 & dadeduy <= 5 ~ "Primary (1-5y)",
+      dadeduy > 5 ~ "Secondary (>5y)",
+      TRUE ~ NA_character_
+    ),
+    dadedu = factor(dadedu,
+                         levels = c("No education", "Primary (1-5y)", "Secondary (>5y)"))
+  ) %>%
+  mutate(
+    hfiacat_bin = case_when(
+      hfiacat %in% c("Food Secure", 
+                     "Mildly Food Insecure") ~ "No/mild insecure",
+      hfiacat %in% c("Moderately Food Insecure", 
+                     "Severely Food Insecure") ~ "Mod/severe insecure",
+      TRUE ~ NA_character_
+    ),
+    hfiacat_bin = factor(hfiacat_bin, 
+                         levels = c("No/mild insecure", "Mod/severe insecure"))
+  ) %>%
+  mutate(
+    latrine_own_seal = case_when(
+      latown == 0 ~ "No latrine",
+      latown == 1 & latseal == 0 ~ "Latrine without water seal",
+      latown == 1 & latseal == 1 ~ "Latrine with water seal",
+      TRUE ~ NA_character_
+    ),
+    latrine_own_seal = factor(latrine_own_seal,
+                                levels = c("No latrine", "Latrine without water seal",
+                                           "Latrine with water seal"))
+  ) %>%
+  # treat "Missing/DK" as NA
+  mutate(
+    asset_phone = na_if(asset_phone, 9)
+  ) 
+
+
+# Make selected variables factors in d_tab1
+vars_to_factor <- c(
+  "momedu",
+  "dadedu", "dadagri",
+  "elec", "floor",
+  "asset_mobile", "asset_phone", "asset_moto",
+  "roof", "walls",
+  "asset_radio", "asset_tvbw", "asset_tvcol", "asset_tv",
+  "asset_refrig", "asset_bike", "asset_sewmach", "asset_wardrobe",
+  "asset_table", "asset_chair", "asset_clock",
+  "asset_khat", "asset_chouki",
+  "tubewell", "storewat", "treatwat",
+  #"latown", "latslab", "latseal", "latfeces", "potty",
+  "latrine_own_seal",
+  #"humfeces", "humfecesch",
+  #"hwlat", "hwlatwat", "hwlatsoap",
+  #"hwkit", "hwkitwat", "hwkitsoap",
+  #"hwsw", "hwss", 
+  "hwsws",
+  "hfiacat_bin"
+)
+
+# optionally check any missing columns (won't error)
+missing_vars <- setdiff(vars_to_factor, names(d_tab1))
+if (length(missing_vars) > 0) {
+  warning("These variables are not in d_tab1: ", paste(missing_vars, collapse = ", "))
+}
+
+# convert those that exist
+vars_present <- intersect(vars_to_factor, names(d_tab1))
+d_tab1[vars_present] <- lapply(d_tab1[vars_present], factor)
+
+# confirm
+str(d_tab1[vars_present])
+
+```
+
+# Marginal arms
+```{r}
+
+marg_wsh_wide <- d_tab1 %>%
+  mutate(
+    wshf_col = recode(as.character(wsh),
+                  `0` = "No WASH",
+                  `1` = "Combined WASH",
+                  ),
+    wshf_col = factor(wshf_col, levels = c("Combined WASH", "No WASH"))
+  )
+
+
+marg_nutr_wide <- d_tab1 %>%
+  mutate(
+    nutr_col = recode(as.character(nutr),
+                  `0` = "No Nutrition",
+                  `1` = "Combined Nutrition",
+                  ),
+    nutr_col = factor(nutr_col, levels = c("Combined Nutrition", "No Nutrition"))
+  )
+```
+
+
+```{r}
+label(d_tab1$momage)          <- "Maternal: Age (years)"
+label(d_tab1$momedu)      <- "Maternal education"
+label(d_tab1$momheight)        <- "Maternal: Height (cm)"
+label(d_tab1$dadedu)      <- "Paternal education"
+label(d_tab1$dadagri)     <- "Paternal: Works in agriculture"
+#------
+label(marg_wsh_wide$momage)          <- "Maternal: Age (years)"
+label(marg_wsh_wide$momedu)      <- "Maternal education"
+label(marg_wsh_wide$momheight)        <- "Maternal: Height (cm)"
+label(marg_wsh_wide$dadedu)      <- "Paternal education"
+label(marg_wsh_wide$dadagri)     <- "Paternal: Works in agriculture"
+#------
+label(marg_nutr_wide$momage)          <- "Maternal: Age (years)"
+label(marg_nutr_wide$momedu)      <- "Maternal education"
+label(marg_nutr_wide$momheight)        <- "Maternal: Height (cm)"
+label(marg_nutr_wide$dadedu)      <- "Paternal education"
+label(marg_nutr_wide$dadagri)     <- "Paternal: Works in agriculture"
+
+label(d_tab1$iwi)         <- "International wealth index"
+#------
+label(marg_wsh_wide$iwi)         <- "International wealth index"
+#------
+label(marg_nutr_wide$iwi)         <- "International wealth index"
+
+label(d_tab1$Ncomp)           <- "Number of households per compound"
+label(d_tab1$Nhh)             <- "Number of people per compound"
+label(d_tab1$Nlt18)        <- "Number of children <18 years in household"
+#------
+label(marg_wsh_wide$Ncomp)           <- "Number of households per compound"
+label(marg_wsh_wide$Nhh)             <- "Number of people per compound"
+label(marg_wsh_wide$Nlt18)        <- "Number of children <18 years in household"
+#------
+label(marg_nutr_wide$Ncomp)           <- "Number of households per compound"
+label(marg_nutr_wide$Nhh)             <- "Number of people per compound"
+label(marg_nutr_wide$Nlt18)        <- "Number of children <18 years in household"
+
+#label(d_tab1$elec)            <- "Has electricity"
+#label(d_tab1$floor)           <- "Has a cement floor"
+#label(d_tab1$asset_mobile)     <- "Owns a mobile phone"
+#label(d_tab1$asset_phone)     <- "Owns a phone"
+#label(d_tab1$asset_moto)      <- "Owns a motorcycle"
+#label(d_tab1$roof)      <- "Owns a roof"
+#label(d_tab1$walls)      <- "Owns a walls"
+#label(d_tab1$asset_radio)      <- "Owns a radio"
+#label(d_tab1$asset_tvbw)      <- "Owns a TV (black and white)"
+#label(d_tab1$asset_tvcol)      <- "Owns a TV (colored)"
+#label(d_tab1$asset_tv)      <- "Owns a TV"
+#label(d_tab1$asset_refrig)      <- "Owns a refrigerator"
+#label(d_tab1$asset_bike)      <- "Owns a bicycle"
+#label(d_tab1$asset_sewmach)      <- "Owns a sewing machine"
+#label(d_tab1$asset_wardrobe)      <- "Owns a wardrobe"
+#label(d_tab1$asset_table)      <- "Owns a table"
+#label(d_tab1$asset_chair)      <- "Owns a chair"
+#label(d_tab1$asset_clock)      <- "Owns a clock"
+#label(d_tab1$asset_khat)      <- "Owns a khat"
+#label(d_tab1$asset_chouki)      <- "Owns a chouki"
+
+label(d_tab1$tubewell) <- "Primary drinking water source"
+label(d_tab1$watmin)      <- "Distance to primary water source (min)"
+label(d_tab1$storewat)  <- "Reported storing drinking water"
+label(d_tab1$treatwat)  <- "Reported treating water today or yesterday"
+#------
+label(marg_wsh_wide$tubewell) <- "Primary drinking water source"
+label(marg_wsh_wide$watmin)      <- "Distance to primary water source (min)"
+label(marg_wsh_wide$storewat)  <- "Reported storing drinking water"
+label(marg_wsh_wide$treatwat)  <- "Reported treating water today or yesterday"
+#------
+label(marg_nutr_wide$tubewell) <- "Primary drinking water source"
+label(marg_nutr_wide$watmin)      <- "Distance to primary water source (min)"
+label(marg_nutr_wide$storewat)  <- "Reported storing drinking water"
+label(marg_nutr_wide$treatwat)  <- "Reported treating water today or yesterday"
+
+label(d_tab1$latrine_own_seal) <- "Latrine"
+#------
+label(marg_wsh_wide$latrine_own_seal) <- "Latrine"
+#------
+label(marg_nutr_wide$latrine_own_seal) <- "Latrine"
+#label(d_tab1$latown)       <- "Own any latrine"
+#label(d_tab1$latslab)      <- "Latrine has concrete slab"
+#label(d_tab1$latseal)        <- "Latrine has functional water seal"
+#label(d_tab1$latfeces)        <- "No visible feces on slab/floor of latrine"
+#label(d_tab1$potty)        <- "Has a potty for child defecation"
+#label(d_tab1$humfeces)        <- "Human feces observed in house/compound"
+#label(d_tab1$humfecesch)        <- "Human feces where child spends most time"
+
+#label(d_tab1$hwlat)        <- "Has handwashing location w/in 6 steps of latrine"
+#label(d_tab1$hwlatwat)         <- "Has handwashing location w/in 6 steps of latrine w/ water"
+#label(d_tab1$hwlatsoap)         <- "Has handwashing location w/in 6 steps of latrine w/ soap"
+#label(d_tab1$hwkit)         <- "Has handwashing location w/in 6 steps of kitchen"
+#label(d_tab1$hwkitwat)         <- "Has handwashing location w/in 6 steps of kitchen w/ water"
+#label(d_tab1$hwkitsoap)         <- "Has handwashing location w/in 6 steps of kitchen w/ soap"
+#label(d_tab1$hwsw)         <- "Primary handwashing location has water"
+#label(d_tab1$hwss)         <- "Primary handwashing location has soap"
+label(d_tab1$hwsws)         <- "Primary handwashing location has water and soap"
+#------
+label(marg_wsh_wide$hwsws)         <- "Primary handwashing location has water and soap"
+#------
+label(marg_nutr_wide$hwsws)         <- "Primary handwashing location has water and soap"
+
+label(d_tab1$hfiacat_bin)          <- "HFIAS food insecurity category"
+
+t1 <- table1(
+  ~ momage + momedu + momheight + 
+    dadedu + dadagri +
+    iwi + 
+    Ncomp + Nhh + Nlt18 + 
+    #elec + floor + asset_mobile + asset_phone + asset_moto + roof + walls + asset_radio + asset_tvbw +
+    #asset_tvcol + asset_tv + asset_refrig + asset_bike + asset_sewmach + asset_wardrobe + asset_table + asset_chair + asset_clock +
+    #asset_khat + asset_chouki + 
+    tubewell + watmin + storewat + treatwat + 
+    latrine_own_seal + 
+    #latown + latslab + latseal + latfeces + potty + humfeces + #humfecesch + 
+    #hwlat + 
+    #hwlatwat + hwlatsoap + hwkit + 
+    #hwkitwat + hwkitsoap + hwsw + hwss + 
+    hwsws + 
+    hfiacat_bin
+  | tr,
+  data = d_tab1,
+  overall = FALSE,
+  render.missing = NULL,
+  render.categorical = "FREQ (PCTnoNA%)"
+)
+
+t1
+```
+
+
+
+# Session info
+
+```{r}
+#| label: session info
+
+sessionInfo()
+
+```
