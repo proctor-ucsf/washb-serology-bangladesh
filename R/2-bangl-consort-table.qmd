@@ -1,0 +1,192 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "CONSORT: Number of clusters and children by treatment arm (Control, Nutrition, WSH, Nutrition + WSH)"
+author: "Pearl Ante-Testard"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+# Preamble
+
+```{r preamble}
+#| label: preamble
+
+#----------------------------
+# clean environment
+#----------------------------
+rm(list=ls(all=TRUE))
+#----------------------------
+# source the config file
+#----------------------------
+library(here)
+here()
+source(here("R","0-config.R"))
+```
+
+# Read in the data
+
+```{r}
+#| label: read data
+
+#---------------------------------
+# load the formatted MBA data
+# for WASH Benefits Bangladesh, 
+# created by
+# 5-seropositivity_cutoffs.Qmd
+#
+# data are in long format
+# by child-visit-antigen
+#---------------------------------
+d1 <- read_rds(file = here("../../data/bangl/luminex/final/",
+                           "washb_bangl_luminex_igg_seropos_pathogen_2026-01-29.rds")) %>%
+  filter(!is.na(tr))
+#-------------------------------
+# report the number of kids and
+# samples
+#-------------------------------
+cat("\n\nTHE DATA INCLUDE", nrow(d1), "SAMPLES FROM",length(unique(d1$childid)),"CHILDREN\n")
+
+#-------------------------------
+# report the number of clusters
+#-------------------------------
+cat("\n\nTHE DATA INCLUDE",length(unique(d1$clusterid)), "CLUSTERS\n")
+
+```
+
+# Table 1: Number of clusters by treatment arm
+
+```{r}
+
+#| label: Create the table for number of clusters by treatment arm
+
+d2 <- d1 %>%
+  distinct(clusterid,.keep_all = TRUE)
+
+d2_tmp <- d2 %>%
+  mutate(clus_dummy = factor("Observations"))  # same level for all rows
+
+tab1 <- table1(
+  ~ clus_dummy | tr,
+  data = d2_tmp,
+  overall = FALSE,
+  rowlabelhead = "Arm",
+  # summarize categorical by N only
+  render.categorical = function(x) c("N" = sum(!is.na(x))),
+  topclass = "Rtable1-grid Rtable1-shade Rtable1-times Rtable1-row"
+)
+
+tab1
+
+
+```
+
+# Table 2: Number of clusters and children by treatment arm per visit
+
+```{r}
+
+#| label: Create the table for number of clusters by treatment arm per visit
+
+d2_2 <- d1 %>%
+  distinct(clusterid, visit, .keep_all = TRUE)
+d2_tmp_2 <- d2_2 %>%
+  mutate(clus_dummy = factor("Observations"))  # same level for all rows
+
+tab2 <- table1(
+  ~ clus_dummy | tr + visit,
+  data = d2_tmp_2,
+  overall = FALSE,
+  rowlabelhead = "Arm",
+  # summarize categorical by N only
+  render.categorical = function(x) c("N" = sum(!is.na(x))),
+  topclass = "Rtable1-grid Rtable1-shade Rtable1-times Rtable1-row"
+)
+
+tab2
+
+```
+
+```{r}
+#| label: Create the table for number of children by treatment arm per visit
+
+d3 <- d1 %>%
+  distinct(childid, visit, .keep_all = TRUE)
+d3_tmp <- d3 %>%
+  mutate(child_dummy = factor("Observations"))  # same level for all rows
+
+tab3 <- table1(
+  ~ child_dummy | tr + visit,
+  data = d3_tmp,
+  overall = FALSE,
+  rowlabelhead = "Arm",
+  # summarize categorical by N only
+  render.categorical = function(x) c("N" = sum(!is.na(x))),
+  topclass = "Rtable1-grid Rtable1-shade Rtable1-times Rtable1-row"
+)
+
+tab3
+
+```
+
+# Table 3: Number of clusters and children by treatment arm in the EED substudy
+
+```{r}
+#| label: Create table for number of clusters by treatment arm in the EED substudy
+
+d4 <- d1 %>%
+  filter(eed == "EED substudy")
+cat("\n\nTHE DATA INCLUDE",length(unique(d4$clusterid)), "CLUSTERS\n in the EED substudy\n")
+
+d4_tmp <- d4 %>%
+  distinct(clusterid, visit,.keep_all = TRUE) %>%
+  mutate(clus_dummy = factor("Observations"))  # same level for all rows
+
+tab4 <- table1(
+  ~ clus_dummy | tr + visit,
+  data = d4_tmp,
+  overall = FALSE,
+  rowlabelhead = "Arm",
+  # summarize categorical by N only
+  render.categorical = function(x) c("N" = sum(!is.na(x))),
+  topclass = "Rtable1-grid Rtable1-shade Rtable1-times Rtable1-row"
+)
+
+tab4
+
+```
+
+```{r}
+#| label: Create table for number of children by treatment arm in the EED substudy
+
+d5 <- d1 %>%
+  filter(eed == "EED substudy")
+cat("\n\nTHE DATA INCLUDE",length(unique(d5$sampleid)), "SAMPLES FROM",length(unique(d5$childid)),"CHILDREN\n in the EED substudy")
+
+d5_tmp <- d5 %>%
+  distinct(childid, visit, .keep_all = TRUE) %>%
+  mutate(child_dummy = factor("Observations"))  # same level for all rows
+
+tab5 <- table1(
+  ~ child_dummy | tr + visit,
+  data = d5_tmp,
+  overall = FALSE,
+  rowlabelhead = "Arm",
+  # summarize categorical by N only
+  render.categorical = function(x) c("N" = sum(!is.na(x))),
+  topclass = "Rtable1-grid Rtable1-shade Rtable1-times Rtable1-row"
+)
+
+tab5
+
+```
+
+```{r}
+#| label: session info
+
+sessionInfo()
+
+```
