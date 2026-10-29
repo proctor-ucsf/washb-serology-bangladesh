@@ -1,0 +1,321 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "Summarize IgG distributions for each antigen"
+author: "Ben Arnold, Pearl Ante-Testard, pearl.ante@ucsf.edu"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+# Summary
+
+Create histograms of IgG levels to enteric antigens
+
+# Preamble
+
+```{r preamble}
+library(here)
+here()
+#----------------------------
+# source the config file
+#----------------------------
+source(here("R","0-config.R"))
+
+```
+
+# Load the Luminex IgG data
+
+```{r load antibody data}
+#-------------------------------
+# load the formatted MBA data
+# for EcoMID, created by
+# 0-all_sero_results_dataclean.Rmd
+#
+# data are in long format
+#-------------------------------
+d <- read_rds(file = here("../../data/bangl/luminex/final/",
+                           "washb_bangl_luminex_igg_seropos_2026-03-17.rds")) 
+
+
+#-------------------------------
+# filter to relevant antigens
+# relevel antigen labels for
+# plotting in order
+#-------------------------------
+d1 <- d %>%
+  filter(antigen %in% c(
+    "norogi5", "norogii3", "norogii4", "norogii6", "norogii17",
+    "etec", "p18", "p39", "ipab", "hyle", "salb", "sald",
+    "osp_inaba", "osp_ogawa", "cp17", "cp23", "vsp5", "leca",
+    "t24h", "es33", "nie"
+  )) %>%
+  mutate(
+    antigen_plot = antigen_lab,
+    antigen_plot = recode(
+      antigen_plot,
+      "Salmonella HylE" = "Salmonella HlyE"
+    ),
+    antigen_plot = factor(
+      antigen_plot,
+      levels = c(
+        "Norovirus GI_5", "Norovirus GII_3",
+        "Norovirus GII_4", "Norovirus GII_6",
+        "Norovirus GII_17", "LT-ETEC LTB",
+        "Campylobacter p18", "Campylobacter p39",
+        "Shigella IpaB", "Salmonella HlyE",
+        "Salmonella LPS B", "Salmonella LPS D",
+        "V. cholerae OSP-Inaba", "V. cholerae OSP-Ogawa",
+        "Cryptosporidium Cp17", "Cryptosporidium Cp23",
+        "Giardia VSP-5", "E. histolytica LecA",
+        "T. solium T24", "T. solium Es33",
+        "Strongyloides NIE"
+      )
+    )
+  )
+
+
+#-------------------------------
+# filter to 6-12 months old
+#-------------------------------
+d2 <- d1 %>%
+  filter(!is.na(agemonth), between(agemonth, 6, 12))
+
+
+#-------------------------------
+# filter to visit 1 and 2
+#-------------------------------
+d3 <- d1 %>%
+  filter(visit == 1 | visit == 2)
+
+#-------------------------------
+# cutoff columns:
+# mficut_cdc = external/ROC-based cutoff (solid line)
+# mficut_pec = pre-exposed cohort cutoff (dashed line)
+# mficut_desc labels which type(s) apply per antigen
+#-------------------------------
+table(d1$antigen_plot, d1$mficut_desc)
+
+
+```
+
+
+# Create histograms of IgG values (all samples)
+
+```{r distributions of igg}
+
+# custom log labels
+log10labs <- c( 
+  expression(10^0),
+  expression(10^1),
+  expression(10^2),
+  expression(10^3),
+  expression(10^4),
+  expression(10^5)
+)
+
+
+# mfi cutoffs
+# mficut_cdc = external/ROC-based cutoff -> solid line
+# mficut_pec = pre-exposed cohort cutoff -> dashed line
+# Strongyloides has no pre-exposed cohort cutoff estimate
+# (too few seroconversions) - filtering on !is.na(mficut_pec)
+# means it will only show the solid (external/ROC) line
+d_mficut_roc <- d1 %>%
+  filter(!is.na(mficut_cdc)) %>%
+  group_by(antigen_plot) %>%
+  select(antigen_plot, mficut_cdc) %>%
+  distinct() %>%
+  mutate(log10mficut = log10(mficut_cdc),
+         cutoff_type = "External / ROC-based") %>%
+  select(antigen_plot, log10mficut, cutoff_type)
+
+d_mficut_preexp <- d1 %>%
+  filter(!is.na(mficut_pec), antigen_plot != "Strongyloides NIE") %>%
+  group_by(antigen_plot) %>%
+  select(antigen_plot, mficut_pec) %>%
+  distinct() %>%
+  mutate(log10mficut = log10(mficut_pec),
+         cutoff_type = "Pre-exposed cohort") %>%
+  select(antigen_plot, log10mficut, cutoff_type)
+
+d_mficut <- bind_rows(d_mficut_roc, d_mficut_preexp) %>%
+  mutate(cutoff_type = factor(cutoff_type, levels = c("External / ROC-based", "Pre-exposed cohort")))
+
+plot_igg_dists <- ggplot(data=d1, aes(x=log10mfi)) +
+  facet_wrap(.~ antigen_plot,ncol=3, scales = "free_y") +
+  geom_histogram(binwidth = 0.1, fill = "#0072B2",color = NA, alpha=1) +
+  geom_vline(
+    data = d_mficut,
+    aes(xintercept = log10mficut, linetype = cutoff_type),
+    color = "gray30"
+  ) +
+  scale_linetype_manual(
+    name = "Cutoff",
+    values = c(
+      "External / ROC-based" = "solid",
+      "Pre-exposed cohort" = "dashed"
+    )
+  ) +
+
+  scale_x_continuous(breaks = 0:5, labels = log10labs) +
+  coord_cartesian(xlim = c(0, 5)) +
+  labs(
+    x = "Luminex IgG response (MFI-bg)",
+    y = "Number of samples"
+  ) +
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+plot_igg_dists
+
+ggsave(filename = here("output","manuscript-figures","washbb_igg_allsamples_distributions.png"),plot_igg_dists, device = "png",height = 180,width=180, units = "mm")
+
+```
+
+
+# Create histograms of IgG values (6-12 months)
+
+```{r distributions of igg 6-12 months}
+
+# mfi cutoffs
+# Strongyloides has no pre-exposed cohort cutoff estimate
+# (too few seroconversions), so it will only show the
+# solid (external/ROC) line
+d2_mficut_roc <- d2 %>%
+  filter(!is.na(mficut_cdc)) %>%
+  group_by(antigen_plot) %>%
+  select(antigen_plot, mficut_cdc) %>%
+  distinct() %>%
+  mutate(log10mficut = log10(mficut_cdc),
+         cutoff_type = "External / ROC-based") %>%
+  select(antigen_plot, log10mficut, cutoff_type)
+
+d2_mficut_preexp <- d2 %>%
+  filter(!is.na(mficut_pec), antigen_plot != "Strongyloides NIE") %>%
+  group_by(antigen_plot) %>%
+  select(antigen_plot, mficut_pec) %>%
+  distinct() %>%
+  mutate(log10mficut = log10(mficut_pec),
+         cutoff_type = "Pre-exposed cohort") %>%
+  select(antigen_plot, log10mficut, cutoff_type)
+
+d2_mficut <- bind_rows(d2_mficut_roc, d2_mficut_preexp) %>%
+  mutate(cutoff_type = factor(cutoff_type, levels = c("External / ROC-based", "Pre-exposed cohort")))
+
+plot_igg_dists_2 <- ggplot(data=d2, aes(x=log10mfi)) +
+  facet_wrap(.~ antigen_plot,ncol=3, scales = "free_y") +
+  geom_histogram(binwidth = 0.1, fill = "#0072B2",color = NA, alpha=1) +
+  geom_vline(data=d2_mficut, aes(xintercept = log10mficut, linetype = cutoff_type),color="gray30") +
+  scale_linetype_manual(name = "Cutoff", values = c("External / ROC-based" = "solid", "Pre-exposed cohort" = "dashed")) +
+  scale_x_continuous(breaks = 0:5, labels = log10labs) +
+  coord_cartesian(xlim=c(0,5)) +
+  labs(x="Luminex IgG response (MFI-bg) among children 6-12 months",y="Number of samples") +
+  theme_classic() +
+  theme(legend.position = "bottom")
+
+plot_igg_dists_2
+
+ggsave(filename = here("output","manuscript-figures","washbb_igg_6-12months_distributions.png"),plot_igg_dists_2, device = "png",height = 180,width=180, units = "mm")
+
+```
+
+# Create histograms of IgG values (visits 1 and 2)
+
+```{r distributions of igg visit and 2}
+
+# mfi cutoffs
+# Strongyloides has no pre-exposed cohort cutoff estimate
+# (too few seroconversions), so it will only show the
+# solid (external/ROC) line
+d3_mficut_roc <- d3 %>%
+  filter(!is.na(mficut_cdc)) %>%
+  group_by(antigen_plot) %>%
+  select(antigen_plot, mficut_cdc) %>%
+  distinct() %>%
+  mutate(log10mficut = log10(mficut_cdc),
+         cutoff_type = "External / ROC-based") %>%
+  select(antigen_plot, log10mficut, cutoff_type)
+
+d3_mficut_preexp <- d3 %>%
+  filter(!is.na(mficut_pec), antigen_plot != "Strongyloides NIE") %>%
+  group_by(antigen_plot) %>%
+  select(antigen_plot, mficut_pec) %>%
+  distinct() %>%
+  mutate(log10mficut = log10(mficut_pec),
+         cutoff_type = "Pre-exposed cohort") %>%
+  select(antigen_plot, log10mficut, cutoff_type)
+
+d3_mficut <- bind_rows(d3_mficut_roc, d3_mficut_preexp) %>%
+  mutate(cutoff_type = factor(cutoff_type, levels = c("External / ROC-based", "Pre-exposed cohort")))
+
+plot_igg_dists_3 <- ggplot(
+  data = d3 %>% filter(visit %in% c(1, 2)),
+  aes(x = log10mfi, fill = factor(visit))
+) +
+
+  scale_fill_manual(
+    name = "visit",
+    values = c(
+      "1" = "darkblue",   # Visit 1: darker blue
+      "2" = "#A6CEE3"  # Visit 2: lighter blue
+    ),
+    labels = c("Visit 1", "Visit 2")
+  ) +
+  facet_wrap(. ~ antigen_plot, ncol = 3, scales = "free_y") +
+
+  geom_histogram(
+    binwidth = 0.1,
+    position = "identity",
+    color = NA,
+    alpha = 0.8
+  ) +
+
+  geom_vline(
+    data = d3_mficut,
+    aes(
+      xintercept = log10mficut,
+      linetype = cutoff_type
+    ),
+    inherit.aes = FALSE,
+    color = "gray30"
+  ) +
+
+  scale_linetype_manual(
+    name = "Cutoff",
+    values = c(
+      "External / ROC-based" = "solid",
+      "Pre-exposed cohort" = "dashed"
+    )
+  ) +
+
+  scale_x_continuous(
+    breaks = 0:5,
+    labels = log10labs
+  ) +
+  coord_cartesian(xlim = c(0, 5)) +
+  labs(
+    x = "Luminex IgG response (MFI-bg)",
+    y = "Number of samples"
+  ) +
+  theme_classic() +
+  theme(
+    legend.position = "bottom"
+  )
+
+plot_igg_dists_3
+
+ggsave(filename = here("output","manuscript-figures","washbb_igg_visit1and2_distributions.png"),plot_igg_dists_3, device = "png",height = 180,width=180, units = "mm")
+
+```
+
+
+
+# Session Info
+```{r session info}
+sessionInfo()
+```
