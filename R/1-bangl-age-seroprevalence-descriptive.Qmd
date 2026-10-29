@@ -79,8 +79,6 @@ Visit 1 represents mainly maternal IgG responses, as nearly all measurements fro
 ```{r}
 #| label: Examine age distributions
 
-
-
 #---------------------------------
 # examine age distributions
 #---------------------------------
@@ -391,8 +389,6 @@ for(i in 1:length(pathogens)) {
       labs(x = "Visit", y = "IgG seroprevalence (%)") + 
       theme_minimal()
   )
-
-  
 }
 
 ```
