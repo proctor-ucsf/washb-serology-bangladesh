@@ -1,0 +1,1227 @@
+---
+title: "WASH Benefits Bangladesh serology"
+subtitle: "Age-dependent mean IgG and seroprevalence for enteric pathogens by WSH"
+author: "Ben Arnold ben.arnold@ucsf.edu"
+date: "updated: `r Sys.time()`"
+format:
+  html:
+    
+    toc: true
+    embed-resources: true
+    code-fold: true
+    link-external-newwindow: true
+---
+
+# Summary
+
+Read in processed Luminex data and summarize
+
+# Preamble
+
+```{r preamble}
+library(here)
+here()
+#----------------------------
+# source the config file
+#----------------------------
+source(here("R","0-config.R"))
+```
+
+# Load the WASHB serology data
+# Read in the data
+
+```{r}
+# # With real treatment arms 
+# tx <- read_csv(here("../../data/bangl/baseline/", "washb-bangladesh-enrol.csv"), 
+#                col_names = TRUE) %>%
+#   distinct(clusterid, tr, block) %>% 
+#   filter(tr %in% c("Control", "WSH", "Nutrition", "Nutrition + WSH")) %>%
+#   mutate(tr = case_when(tr == "Control" ~ "Control",
+#                         tr == "WSH" ~ "WSH",
+#                         tr == "Nutrition" ~ "Nutrition",
+#                         tr == "Nutrition + WSH" ~ "Nutrition + WSH"),
+#          tr = factor(tr, levels = c("Control", "WSH", "Nutrition", "Nutrition + WSH"))) %>%
+#   select(clusterid, block, tr)
+# 
+# # processed serology dataset
+# d1 <- read_rds(file = here("../../data/bangl/luminex/final/","washb_bangl_luminex_igg_seropos_2025-08-29.rds"))
+# 
+# d2 <- d1 %>%
+#   left_join(tx, by = join_by(clusterid), relationship = "many-to-one") %>%
+#   filter(!is.na(tr)) %>%
+#   # Indicatior for WSH and Nutrition interventions
+#   mutate(wsh = ifelse(tr %in% c("WSH","Nutrition + WSH"), 1, 0), 
+#          nutr = ifelse(tr %in% c("Nutrition","Nutrition + WSH"), 1, 0),
+#          wshf = ifelse(wsh==1,"WASH","No WASH"),
+#          nutrf = ifelse(nutr==1,"Nutrition","No Nutrition"),
+#          wshf = factor(wshf, levels=c("No WASH","WASH")),
+#          nutrf = factor(nutrf, levels=c("No Nutrition","Nutrition"))
+#          )
+
+d1 <-  read_rds(file = here("../../data/bangl/luminex/final/","washb_bangl_luminex_igg_seropos_2026-09-16.rds"))
+  
+d2 <- d1 %>%
+#   # final visit only
+#   filter(visit == 3) %>%
+# #  left_join(tx, by = join_by(clusterid)) %>%
+  filter(!is.na(tr)) %>%
+  # Indicatior for WSH and Nutrition interventions
+  mutate(wsh = ifelse(tr %in% c("WSH","Nutrition + WSH"), 1, 0), 
+         nutr = ifelse(tr %in% c("Nutrition","Nutrition + WSH"), 1, 0),
+         wshf = ifelse(wsh==1,"WASH","No WASH"),
+         nutrf = ifelse(nutr==1,"Nutrition","No Nutrition"),
+         wshf = factor(wshf, levels=c("No WASH","WASH")),
+         nutrf = factor(nutrf, levels=c("No Nutrition","Nutrition")))
+```
+
+```{r}
+#| label: aggregate to pathogen-level dataset
+#-------------------------------
+# 12 primary pathogens from SAP
+# Antigen groups for each primary pathogen
+#-------------------------------
+
+antigen_map <- list(
+  Campylobacter   = c("p18", "p39"),
+  Cholera         = c("osp_inaba", "osp_ogawa"),      # exclude ctb due to cross-reactivity with ETEC LTB
+  LT_ETEC         = c("etec"),
+  Salmonella_BD   = c("salb", "sald"),                # Enteritidis + Typhimurium
+  Salmonella_HlyE = c("hlye"),                        # Typhi/Paratyphi
+  Shigella        = c("ipab"),
+  Cryptosporidium = c("cp17", "cp23"),
+  E_histolytica   = c("leca"),
+  Giardia         = c("vsp5"),
+  Strongyloides   = c("nie"),
+  T_solium        = c("t24h", "es33"),
+  Norovirus       = c("norogi5", "norogii3", "norogii4", "norogii6", "norogii17")
+)
+
+#-------------------------
+# Prepare a dataset 
+# one row per child × pathogen, 
+# with seropos = 1 if child is positive to any antigen in that pathogen group
+# Collapse antigen-level to pathogen-level
+#-------------------------
+# pathogen list
+pathogen_labels <- c("Norovirus GI/GII","LT-ETEC (LTB)","Campylobacter (p18,p39)","Shigella/EIEC (IpaB)","S. enterica typhi (HlyE)","S. enterica (LPS B,D)","V. cholerae (OSP-Inaba/Ogawa)","Cryptosporidium (Cp17,Cp23)","Giardia (VSP-5)","E. histolytica (LecA)","T. solium (T24,Es33)","S. stercoralis (NIE)")
+
+d_pathogen <- lapply(names(antigen_map), function(p) {
+  d2 %>%
+    filter(antigen %in% antigen_map[[p]]) %>%
+    group_by(block, clusterid, wsh, wshf, nutr, nutrf, tr, childid, visit, agemonth) %>%
+    summarise(seropos = as.integer(any(seropos == 1)), .groups = "drop") %>%
+    mutate(pathogen = p)
+}) %>%
+  bind_rows() %>%
+  # create pretty pathogen/antigen labels
+  mutate(
+    pathogenf = case_when(
+      pathogen == "Norovirus" ~ "Norovirus GI/GII",
+      pathogen == "LT_ETEC" ~ "LT-ETEC (LTB)",
+      pathogen == "Campylobacter" ~ "Campylobacter (p18,p39)",
+      pathogen == "Shigella" ~ "Shigella/EIEC (IpaB)",
+      pathogen == "Salmonella_HlyE" ~ "S. enterica typhi (HlyE)",
+      pathogen == "Salmonella_BD" ~ "S. enterica (LPS B,D)",
+      pathogen == "Cholera" ~ "V. cholerae (OSP-Inaba/Ogawa)",
+      pathogen == "Cryptosporidium" ~ "Cryptosporidium (Cp17,Cp23)",
+      pathogen == "Giardia" ~ "Giardia (VSP-5)",
+      pathogen == "E_histolytica" ~ "E. histolytica (LecA)",
+      pathogen == "T_solium" ~ "T. solium (T24,Es33)",
+      pathogen == "Strongyloides" ~ "S. stercoralis (NIE)",
+      TRUE ~ as.character(NA)
+    ), 
+    pathogenf = factor(pathogenf, levels = pathogen_labels)
+  )
+
+#-------------------------
+# filter the antigen-level
+# dataset to just the enterics
+#-------------------------
+d3 <- d2 %>%
+filter(antigen %in% unlist(antigen_map))
+
+```
+
+
+# Summary of age by visit
+
+Visit 1 represents mainly maternal IgG responses, as nearly all measurements from visit 1 were among children <6 months old.
+
+```{r}
+#| label: Examine age distributions
+
+#---------------------------------
+# examine age distributions
+#---------------------------------
+d3_child <- d3 %>% group_by(sampleid) %>% slice(1)
+by(data=d3_child,d3_child$visit,function(x) summary(x$agemonth))
+by(data=d3_child,d3_child$visit,function(x) sd(x$agemonth, na.rm=TRUE))
+
+plot_age_visit <- ggplot(d3_child, aes(x=agemonth,fill=factor(visit)),group=(visit)) + 
+  geom_histogram(alpha=0.7,bins=40, position = "identity") + 
+  scale_x_continuous(breaks=seq(0,36,by=6)) +
+  scale_fill_brewer(palette="Dark2") +
+  guides(fill = guide_legend(title="visit")) +
+  labs(x = "Age in months", y = "Number of children") +
+  theme_minimal() +
+  theme(
+    legend.position = c(0.93,0.75)
+  )
+
+plot_age_visit
+ggsave(here("output","washbb-age-dist-visit.png"),plot_age_visit,device = "png",width=90,height=70,units="mm")
+
+
+ggplot(d3_child, aes(x=agemonth,fill=eed),group=eed) + 
+  geom_histogram(alpha=0.7,bins=40, position = "identity") + 
+  scale_x_continuous(breaks=seq(0,36,by=6)) +
+  scale_fill_manual(values=cbpal[c(4,8)]) +
+  labs(x = "Age in months", y = "Number of children") +
+  theme_minimal() 
+
+#---------------------------------
+# samples by visit and EED substudy
+#---------------------------------
+table(d3_child$visit, d3_child$eed)
+
+#---------------------------------
+# summarize median and IQR of
+# child age at each visit
+#---------------------------------
+
+d_age_visit <- d3 %>%
+  select(childid,visit,agemonth) %>%
+  group_by(childid,visit) %>%
+  slice(1)
+
+summary(d_age_visit$agemonth[d_age_visit$visit==1])
+summary(d_age_visit$agemonth[d_age_visit$visit==2])
+summary(d_age_visit$agemonth[d_age_visit$visit==3])
+
+# tally the total number of children and measurements
+dim(d_age_visit)
+length(unique(d_age_visit$childid))
+```
+
+# Age-MFI
+
+Geometric mean MFI by age for all 4 treatment groups
+```{r}
+#| label: plot age-dependent mfi by antigen
+#| warning: FALSE
+#| fig-height: 12
+#| fig-width: 8
+
+#-------------------------------
+# custom log labels
+#-------------------------------
+log10labs <- c( 
+  expression(10^0),
+  expression(10^1),
+  expression(10^2),
+  expression(10^3),
+  expression(10^4)
+)
+
+#-------------------------------
+# plot geometric mean MFI
+# by age and treatment arm
+#-------------------------------
+pcols <- cbpal_int
+plot_mfi <- ggplot(data=d3, aes(x=agemonth, y = log10mfi, group = tr, color = tr)) + 
+    facet_wrap(.~antigen_lab,ncol=4) +
+    geom_point(alpha=0.1, size=0.5, color="gray50") +
+    geom_smooth(data=d3 %>% filter(agemonth >= 2 & agemonth<=28), method = "loess", se=FALSE,lwd=0.5) +
+    # geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,4,by=1), labels = log10labs) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols) +
+    labs(x = "Age (months)", y = "Log10 Luminex IgG (MFI-bg)") + 
+    coord_cartesian(ylim=c(0,4.5),xlim=c(0,30)) +
+    theme_minimal()
+
+plot_mfi
+```
+
+
+Geometric mean MFI by age by WASH treatment group
+```{r}
+#| label: plot age-dependent mfi by antigen wash group
+#| warning: FALSE
+#| fig-height: 12
+#| fig-width: 8
+#-------------------------------
+# plot geometric mean MFI
+# by age and treatment arm
+#-------------------------------
+plot_mfi_wash <- ggplot(data=d3, aes(x=agemonth, y = log10mfi, group = wshf, color = wshf)) + 
+    facet_wrap(.~antigen_lab,ncol=4) +
+    geom_point(alpha=0.1,size=0.5, color="gray50") +
+    geom_smooth(data=d3 %>% filter(agemonth >= 2 & agemonth<=28), method = "loess", se=FALSE,lwd=0.5) +
+    scale_y_continuous(breaks = seq(0,4,by=1), labels = log10labs) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=cbpal_int[c(1:2)]) +
+    labs(x = "Age (months)", y = "Log10 Luminex IgG (MFI-bg)") + 
+    coord_cartesian(ylim=c(0,4.5),xlim=c(0,30)) +
+    theme_minimal()
+
+plot_mfi_wash
+```
+
+
+
+# Marginal means by visit
+
+```{r}
+#| label: estimate marginal means and effects in visit 1 2 3
+
+#-------------------------
+# flip the factor levels
+# for emmeans to make
+# the No category the 
+# reference
+#-------------------------
+d_pathogen2 <- d_pathogen %>%
+  mutate(wshf = relevel(wshf,ref="WASH"),
+         nutrf = relevel(nutrf,ref="Nutrition")
+         )
+
+#-------------------------
+# estimate marginal means
+# and differences
+# for visits 1,2,3
+#-------------------------
+marg_means_by_visit <- 
+  foreach(visiti = 1:3, .combine = rbind) %:% 
+
+    foreach(ii = 1:length(pathogen_labels), .combine = rbind) %do% {
+  
+    di <- d_pathogen2 %>%
+    filter(visit==visiti, pathogenf == pathogen_labels[ii])
+
+    # fit linear regression
+    # if the final visit, control for matched pairs (block)
+    # otherwise do not b/c EED substudy did not retain matched design
+    if(visiti == 3) {
+      fiti <- glm(seropos ~ wshf + nutrf + factor(block), data=di, family=gaussian(link="identity"))
+    } else{
+      fiti <- glm(seropos ~ wshf + nutrf, data=di, family=gaussian(link="identity"))
+    }
+    
+    # estimate cluster-robust SEs
+    fiti_vcovCL <- sandwich::vcovCL(fiti, cluster = di$clusterid)
+    
+    # estimate marginal means for each treatment margin, difference scale
+    musi_wash <- emmeans(fiti, ~ wshf   , vcov = fiti_vcovCL)
+    musi_nutr <- emmeans(fiti, ~ nutrf  , vcov = fiti_vcovCL)
+    
+    # estimate marginal contrasts
+    diffi_wash <- pairs(musi_wash, simple = "each")
+    diffi_nutr <- pairs(musi_nutr, simple = "each")
+    
+    # gather results
+    res1 <- data.frame(musi_wash) %>% 
+      rename(marginal_mean = wshf, se_mean = SE, df_mean = df)
+    res2 <- data.frame(musi_nutr) %>% 
+      rename(marginal_mean = nutrf,se_mean = SE, df_mean = df)
+    res3 <- data.frame(diffi_wash) %>% mutate(marginal_mean = "WASH")
+    res4 <- data.frame(diffi_nutr) %>% mutate(marginal_mean = "Nutrition")
+    res5 <- left_join(res1,res3, join_by(marginal_mean))
+    res6 <- left_join(res2,res4, join_by(marginal_mean))
+    res7  <- bind_rows(res5,res6) %>% mutate(pathogenf = pathogen_labels[ii])
+
+#-------------------------
+# separate out the marginal
+# means from the contrasts
+#-------------------------
+marg_means_vx <- res7 %>%
+  mutate(visit = visiti) %>%
+  select(pathogenf, visit, marginal_mean, emmean, se_mean, df_mean, min95=lower.CL, max95 = upper.CL)
+
+# marg_diff_vx <- marg_effects_vx %>%
+#   mutate(visit = i) %>%
+#   filter(!is.na(contrast)) %>%
+#   select(pathogen, visit, contrast, estimate, se=SE, df, t_val = t.ratio, p_value = p.value) %>%
+#   mutate(min95 = estimate - 1.96*se, max95 = estimate + 1.96*se)
+
+return(marg_means_vx)
+
+    }
+
+# format the pathogen label as a factor
+marg_means_by_visit <- marg_means_by_visit %>%
+  mutate(pathogenf = factor(pathogenf, levels=levels(d_pathogen2$pathogenf)),
+         marginal_mean = factor(marginal_mean, levels=c("No WASH","WASH","No Nutrition","Nutrition")))
+
+```
+
+
+
+
+# Age-seroprev, 12-panel
+
+## By WASH intervention 
+
+```{r}
+#| label: plot age-dependent seroprevalence by wash
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+#-------------------------------
+# create shade boxes to delineate
+# different measurement timing
+#-------------------------------
+d_shade_box1 <- data.frame(minX=0,maxX=7.5)
+d_shade_box2 <- data.frame(minX=18,maxX=33)
+
+#-------------------------------
+# set plot colors
+# use color-blind intervention
+# palette saved in config.R
+# cbpal_int <- c("#2B2B2B", "#4C8C8A", "#D08C60","#8A8F73")
+#-------------------------------
+pcols <- cbpal_int
+
+
+#-------------------------------
+# loop over pathogens and plot
+# age-seroprevalence by pathogen
+#
+# the reason we do a loop rather
+# than simply use geom_smooth
+# is to control the loess fit
+#-------------------------------
+
+# get the list of pathogens 
+pathogens <- pathogen_labels
+pplots_wash <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen
+  di <- d_pathogen %>% filter(pathogenf == pathogens[i])
+
+  # fit loess by group and save predicted values
+  fiti <- loess(seropos ~ agemonth, data = di %>% filter(wshf=="WASH"))
+  fitc <- loess(seropos ~ agemonth, data = di %>% filter(wshf=="No WASH"))
+  di_pred <- data.frame(agemonth=seq(3,28,by=0.1))
+  di_pred$WASH <- predict(fiti, newdata = di_pred)
+  di_pred$Control <- predict(fitc, newdata = di_pred)
+  di_pred <- di_pred %>% 
+    pivot_longer(cols=c(WASH,Control),names_to = "wshf", values_to = "pred") %>%
+    mutate(wshf=factor(wshf,levels=c("Control","WASH"),labels=c("No WASH","WASH")))
+  
+  # shift seropos a bit for rug plots
+  di <- di %>%
+    mutate(
+      seropos = ifelse(seropos==1,seropos+0.01,seropos - 0.01),
+      seropos = case_when(
+      wshf == "WASH" & seropos == 1.01 ~ 1.02,
+      wshf == "No WASH" & seropos == -0.01 ~ -0.02,
+      TRUE ~ as.numeric(seropos))
+           )
+  
+  # plot age seroprev
+    pplots_wash[[i]] <- ggplot(data=di, aes(x=agemonth, y = seropos, group = wshf, color = wshf)) + 
+      facet_wrap(.~pathogenf) +
+  # draw shade boxes
+        geom_rect(data=d_shade_box1,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+        geom_rect(data=d_shade_box2,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+
+  # draw points
+    geom_point(alpha=0.1, shape=95, size=0.1) +
+    geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols[1:2], guide=guide_legend(title="")) +
+    labs(x = "Age (months)", y = "IgG seroprevalence (%)") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0,30)) +
+    theme_classic() +
+      theme(
+        legend.position = "bottom",
+        plot.margin = unit(c(5.5,0,5.5,5.5), "pt")
+      )
+  
+}
+
+#-------------------------------
+# loop over pathogens and plot
+# the marginal means
+#-------------------------------
+# get the list of pathogens 
+pathogens <- pathogen_labels
+mplots_wash <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen & WASH contrasts
+  di <- marg_means_by_visit %>% 
+    filter(pathogenf == pathogens[i], marginal_mean %in% c("WASH","No WASH"))
+
+  
+  # plot marginally averaged seroprev
+    mplots_wash[[i]] <- ggplot(data=di, aes(x=visit, y = emmean, color = marginal_mean)) +
+
+  # draw points
+   geom_vline(xintercept = c(1,2,3),linetype = "solid",color="gray90",lwd=0.25) +
+    geom_point(position = position_nudge(x=c(0.2,-0.2)),shape = 95, size=4) +
+    geom_errorbar(data=di, aes(ymin = min95, ymax = max95), width=0.5,position = position_nudge(x=c(0.2,-0.2))) +
+        
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = 1:3) +
+    scale_color_manual(values=pcols[1:2]) + # guide=guide_legend(title="")
+    guides(color = "none", fill = "none", linetype = "none") +
+    labs(x = "Visit", y = "") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0.5,3.5)) +
+    theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(5.5,11,5.5,0), "pt")
+      )
+  
+}
+
+
+#-------------------------------
+# combine the plots into a single
+# figure
+#-------------------------------
+# plot_seroprev_wash <- pplots[[1]] + pplots[[2]] + pplots[[3]] + pplots[[4]] + pplots[[5]] + pplots[[6]] +
+#   pplots[[7]] + pplots[[8]] + pplots[[9]] + pplots[[10]] + pplots[[11]] + pplots[[12]] + 
+#   plot_layout(ncol=3,nrow=4, axes = "collect", guides = "collect") & theme(legend.position = "top")
+
+plot_seroprev_wash <- pplots_wash[[1]] + mplots_wash[[1]] + pplots_wash[[2]] + mplots_wash[[2]] + 
+  pplots_wash[[3]] + mplots_wash[[3]] + pplots_wash[[4]] + mplots_wash[[4]] + 
+  pplots_wash[[5]] + mplots_wash[[5]] + pplots_wash[[6]] + mplots_wash[[6]] +
+  pplots_wash[[7]] + mplots_wash[[7]] + pplots_wash[[8]] + mplots_wash[[8]] + 
+  pplots_wash[[9]] + mplots_wash[[9]] + pplots_wash[[10]] + mplots_wash[[10]] + 
+  pplots_wash[[11]] + mplots_wash[[11]] + pplots_wash[[12]] + mplots_wash[[12]] +
+  plot_layout(ncol=6,nrow=4, axes = "keep", guides = "collect",
+              widths = rep(c(1,0.2),12)) & theme(legend.position = "top")
+
+plot_seroprev_wash
+ggsave(filename = here("output","washbb-age-seroprev-wash.png"),plot_seroprev_wash, device = "png", width=270,height=270,units="mm")
+```
+
+
+
+## By Nutrition intervention 
+
+```{r}
+#| label: plot age-dependent seroprevalence by nutrition
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+#-------------------------------
+# loop over pathogens and plot
+# age-seroprevalence by pathogen
+#
+# the reason we do a loop rather
+# than simply use geom_smooth
+# is to control the loess fit
+#-------------------------------
+
+# get the list of pathogens 
+pathogens <- pathogen_labels
+pplots_nutr <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen
+  di <- d_pathogen %>% filter(pathogenf == pathogens[i])
+  
+  # fit loess by group and save predicted values
+  fiti <- loess(seropos ~ agemonth, data = di %>% filter(nutrf=="Nutrition"))
+  fitc <- loess(seropos ~ agemonth, data = di %>% filter(nutrf=="No Nutrition"))
+  di_pred <- data.frame(agemonth=seq(3,28,by=0.1))
+  di_pred$Nutrition <- predict(fiti, newdata = di_pred)
+  di_pred$Control <- predict(fitc, newdata = di_pred)
+  di_pred <- di_pred %>% 
+    pivot_longer(cols=c(Nutrition,Control),names_to = "nutrf", values_to = "pred") %>%
+    mutate(nutrf=factor(nutrf,levels=c("Control","Nutrition"),labels=c("No Nutrition","Nutrition")))
+  
+  # shift seropos a bit for rug plots
+  di <- di %>%
+    mutate(
+      seropos = ifelse(seropos==1,seropos+0.01,seropos - 0.01),
+      seropos = case_when(
+      nutrf == "Nutrition" & seropos == 1.01 ~ 1.02,
+      nutrf == "No Nutrition" & seropos == -0.01 ~ -0.02,
+      TRUE ~ as.numeric(seropos))
+           )
+  
+    # plot age seroprev
+    pplots_nutr[[i]] <- ggplot(data=di, aes(x=agemonth, y = seropos, group = nutrf, color = nutrf)) + 
+      facet_wrap(.~pathogenf) +
+  # draw shade boxes
+        geom_rect(data=d_shade_box1,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+        geom_rect(data=d_shade_box2,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+
+  # draw points
+    geom_point(alpha=0.1, shape=95, size=0.1) +
+    geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols[c(1,3)], guide=guide_legend(title="")) +
+    labs(x = "Age (months)", y = "IgG seroprevalence (%)") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0,30)) +
+    theme_classic() +
+      theme(
+        legend.position = "bottom",
+        plot.margin = unit(c(5.5,0,5.5,5.5), "pt")
+      )
+  
+}
+
+#-------------------------------
+# loop over pathogens and plot
+# the marginal means
+#-------------------------------
+# get the list of pathogens 
+pathogens <- pathogen_labels
+mplots_nutr <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen & WASH contrasts
+  di <- marg_means_by_visit %>% 
+    filter(pathogenf == pathogens[i], marginal_mean %in% c("Nutrition","No Nutrition"))
+
+  
+  # plot marginally averaged seroprev
+    mplots_nutr[[i]] <- ggplot(data=di, aes(x=visit, y = emmean, color = marginal_mean)) +
+
+  # draw points
+    geom_vline(xintercept = c(1,2,3),linetype = "solid",color="gray90",lwd=0.25) +
+    geom_point(position = position_nudge(x=c(0.2,-0.2)),shape = 95, size=4) +
+    geom_errorbar(data=di, aes(ymin = min95, ymax = max95), width=0.5,position = position_nudge(x=c(0.2,-0.2))) +
+        
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = 1:3) +
+    scale_color_manual(values=pcols[c(1,3)]) + 
+    guides(color = "none", fill = "none", linetype = "none") +
+    labs(x = "Visit", y = "") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0.5,3.5)) +
+    theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(5.5,11,5.5,1), "pt")
+      )
+  
+}
+
+
+#-------------------------------
+# combine the plots into a single
+# figure
+#-------------------------------
+# plot_seroprev_nutr <- pplots[[1]] + pplots[[2]] + pplots[[3]] + pplots[[4]] + pplots[[5]] + pplots[[6]] +
+#   pplots[[7]] + pplots[[8]] + pplots[[9]] + pplots[[10]] + pplots[[11]] + pplots[[12]] + 
+#   plot_layout(ncol=3,nrow=4, axes = "collect", guides = "collect") & theme(legend.position = "top")
+
+plot_seroprev_nutr <- pplots_nutr[[1]] + mplots_nutr[[1]] + pplots_nutr[[2]] + mplots_nutr[[2]] + 
+  pplots_nutr[[3]] + mplots_nutr[[3]] + pplots_nutr[[4]] + mplots_nutr[[4]] + 
+  pplots_nutr[[5]] + mplots_nutr[[5]] + pplots_nutr[[6]] + mplots_nutr[[6]] +
+  pplots_nutr[[7]] + mplots_nutr[[7]] + pplots_nutr[[8]] + mplots_nutr[[8]] + 
+  pplots_nutr[[9]] + mplots_nutr[[9]] + pplots_nutr[[10]] + mplots_nutr[[10]] + 
+  pplots_nutr[[11]] + mplots_nutr[[11]] + pplots_nutr[[12]] + mplots_nutr[[12]] +
+  plot_layout(ncol=6,nrow=4, axes = "keep", guides = "collect",
+              widths = rep(c(1,0.2),12)) & theme(legend.position = "top")
+
+plot_seroprev_nutr
+ggsave(filename = here("output","washbb-age-seroprev-nutr.png"),plot_seroprev_nutr, device = "png", width=270,height=270,units="mm")
+```
+
+
+# Age-seroprev, 6-panel
+
+Consider slightly smaller figures by splitting into higher transmission pathogens and lower transmission pathogens. This allows us to zoom in the Y-axis scale for lower transmission pathogens to better display the data.
+
+## By WASH intervention
+
+```{r}
+#| label: 6panel figure wash high transmission
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+#-------------------------------
+# create shade boxes to delineate
+# different measurement timing
+#-------------------------------
+d_shade_box1 <- data.frame(minX=0,maxX=7.5)
+d_shade_box2 <- data.frame(minX=18,maxX=33)
+
+#-------------------------------
+# set plot colors
+# use color-blind intervention
+# palette saved in config.R
+# cbpal_int <- c("#2B2B2B", "#4C8C8A", "#D08C60","#8A8F73")
+#-------------------------------
+pcols <- cbpal_int
+
+
+#-------------------------------
+# loop over pathogens and plot
+# age-seroprevalence by pathogen
+#
+# the reason we do a loop rather
+# than simply use geom_smooth
+# is to control the loess fit
+#-------------------------------
+
+pathogen_labels_high <- c("Norovirus GI/GII","LT-ETEC (LTB)","Campylobacter (p18,p39)","Shigella/EIEC (IpaB)","Cryptosporidium (Cp17,Cp23)","Giardia (VSP-5)")
+
+# get the list of pathogens 
+pathogens <- pathogen_labels_high
+pplots_wash <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen
+  di <- d_pathogen %>% filter(pathogenf == pathogens[i])
+
+  # fit loess by group and save predicted values
+  fiti <- loess(seropos ~ agemonth, data = di %>% filter(wshf=="WASH"))
+  fitc <- loess(seropos ~ agemonth, data = di %>% filter(wshf=="No WASH"))
+  di_pred <- data.frame(agemonth=seq(3,28,by=0.1))
+  di_pred$WASH <- predict(fiti, newdata = di_pred)
+  di_pred$Control <- predict(fitc, newdata = di_pred)
+  di_pred <- di_pred %>% 
+    pivot_longer(cols=c(WASH,Control),names_to = "wshf", values_to = "pred") %>%
+    mutate(wshf=factor(wshf,levels=c("Control","WASH"),labels=c("No WASH","WASH")))
+  
+  # shift seropos a bit for rug plots
+  di <- di %>%
+    mutate(
+      seropos = ifelse(seropos==1,seropos+0.01,seropos - 0.01),
+      seropos = case_when(
+      wshf == "WASH" & seropos == 1.01 ~ 1.02,
+      wshf == "No WASH" & seropos == -0.01 ~ -0.02,
+      TRUE ~ as.numeric(seropos))
+           )
+  
+  # plot age seroprev
+    pplots_wash[[i]] <- ggplot(data=di, aes(x=agemonth, y = seropos, group = wshf, color = wshf)) + 
+      facet_wrap(.~pathogenf) +
+  # draw shade boxes
+        geom_rect(data=d_shade_box1,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+        geom_rect(data=d_shade_box2,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+
+  # draw points
+    geom_point(alpha=0.1, shape=95, size=0.1) +
+    geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols[1:2], guide=guide_legend(title="")) +
+    labs(x = "Age (months)", y = "IgG seroprevalence (%)") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0,30)) +
+    theme_classic() +
+      theme(
+        legend.position = "bottom",
+        plot.margin = unit(c(5.5,0,5.5,5.5), "pt")
+      )
+  
+}
+
+#-------------------------------
+# loop over pathogens and plot
+# the marginal means
+#-------------------------------
+# get the list of pathogens 
+pathogens <- pathogen_labels_high
+mplots_wash <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen & WASH contrasts
+  di <- marg_means_by_visit %>% 
+    filter(pathogenf == pathogens[i], marginal_mean %in% c("WASH","No WASH"))
+
+  
+  # plot marginally averaged seroprev
+    mplots_wash[[i]] <- ggplot(data=di, aes(x=visit, y = emmean, color = marginal_mean)) +
+
+  # draw points
+    geom_vline(xintercept = c(1,2,3),linetype = "solid",color="gray90",lwd=0.25) +
+    geom_point(position = position_nudge(x=c(0.2,-0.2)),shape = 95, size=4) +
+    geom_errorbar(data=di, aes(ymin = min95, ymax = max95), width=0.5,position = position_nudge(x=c(0.2,-0.2))) +
+        
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = 1:3) +
+    scale_color_manual(values=pcols[1:2]) + # guide=guide_legend(title="")
+    guides(color = "none", fill = "none", linetype = "none") +
+    labs(x = "Visit", y = "") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0.5,3.5)) +
+    theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(5.5,11,5.5,0), "pt")
+      )
+  
+}
+
+
+#-------------------------------
+# combine the plots into a single
+# figure
+#-------------------------------
+
+plot_seroprev_wash_high <- pplots_wash[[1]] + mplots_wash[[1]] + pplots_wash[[2]] + mplots_wash[[2]] + 
+  pplots_wash[[3]] + mplots_wash[[3]] + pplots_wash[[4]] + mplots_wash[[4]] + 
+  pplots_wash[[5]] + mplots_wash[[5]] + pplots_wash[[6]] + mplots_wash[[6]] +
+  plot_layout(ncol=6,nrow=2, axes = "keep", guides = "collect",
+              widths = rep(c(1,0.2),6)) + 
+  plot_annotation(title = "A") & theme(legend.position = "top", plot.title = element_text(face = "bold", size = 14)) 
+
+ggsave(filename = here("output","washbb-age-seroprev-wash_high.png"),plot_seroprev_wash_high, device = "png", width=260,height=150,units="mm")
+
+```
+
+```{r}
+#| label: 6panel figure wash low transmission
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+#-------------------------------
+# create shade boxes to delineate
+# different measurement timing
+#-------------------------------
+d_shade_box1 <- data.frame(minX=0,maxX=7.5)
+d_shade_box2 <- data.frame(minX=18,maxX=33)
+
+#-------------------------------
+# set plot colors
+# use color-blind intervention
+# palette saved in config.R
+# cbpal_int <- c("#2B2B2B", "#4C8C8A", "#D08C60","#8A8F73")
+#-------------------------------
+pcols <- cbpal_int
+
+
+#-------------------------------
+# loop over pathogens and plot
+# age-seroprevalence by pathogen
+#
+# the reason we do a loop rather
+# than simply use geom_smooth
+# is to control the loess fit
+#-------------------------------
+
+pathogen_labels_low <- c("S. enterica typhi (HlyE)", "S. enterica (LPS B,D)","V. cholerae (OSP-Inaba/Ogawa)","E. histolytica (LecA)","T. solium (T24,Es33)","S. stercoralis (NIE)")
+
+# get the list of pathogens 
+pathogens <- pathogen_labels_low
+pplots_wash <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen
+  di <- d_pathogen %>% filter(pathogenf == pathogens[i])
+
+  # fit loess by group and save predicted values
+  fiti <- loess(seropos ~ agemonth, data = di %>% filter(wshf=="WASH"))
+  fitc <- loess(seropos ~ agemonth, data = di %>% filter(wshf=="No WASH"))
+  di_pred <- data.frame(agemonth=seq(3,28,by=0.1))
+  di_pred$WASH <- predict(fiti, newdata = di_pred)
+  di_pred$Control <- predict(fitc, newdata = di_pred)
+  di_pred <- di_pred %>% 
+    pivot_longer(cols=c(WASH,Control),names_to = "wshf", values_to = "pred") %>%
+    mutate(wshf=factor(wshf,levels=c("Control","WASH"),labels=c("No WASH","WASH")))
+  
+  # shift seropos down a lot (to 0.4) for rug plots
+  di <- di %>%
+    mutate(
+      seropos = ifelse(seropos==1,seropos-0.65,seropos - 0.015),
+      seropos = case_when(
+      wshf == "WASH" & seropos >0 ~ 0.355,
+      wshf == "No WASH" & seropos < 0 ~ -0.02,
+      TRUE ~ as.numeric(seropos))
+           )
+  
+  # plot age seroprev
+    pplots_wash[[i]] <- ggplot(data=di, aes(x=agemonth, y = seropos, group = wshf, color = wshf)) + 
+      facet_wrap(.~pathogenf) +
+  # draw shade boxes
+        geom_rect(data=d_shade_box1,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+        geom_rect(data=d_shade_box2,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+
+  # draw points
+    geom_point(alpha=0.1, shape = 95, size=0.1) +
+    geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,0.35,by=0.05), labels = sprintf("%1.0f",seq(0,0.35,by=0.05)*100)) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols[1:2], guide=guide_legend(title="")) +
+    labs(x = "Age (months)", y = "IgG seroprevalence (%)") + 
+    coord_cartesian(ylim=c(-0.02,0.37), xlim=c(0,30)) +
+    theme_classic() +
+      theme(
+        legend.position = "bottom",
+        plot.margin = unit(c(5.5,0,5.5,5.5), "pt")
+      )
+  
+}
+
+#-------------------------------
+# loop over pathogens and plot
+# the marginal means
+#-------------------------------
+# get the list of pathogens 
+pathogens <- pathogen_labels_low
+mplots_wash <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen & WASH contrasts
+  di <- marg_means_by_visit %>% 
+    filter(pathogenf == pathogens[i], marginal_mean %in% c("WASH","No WASH"))
+
+  
+  # plot marginally averaged seroprev
+    mplots_wash[[i]] <- ggplot(data=di, aes(x=visit, y = emmean, color = marginal_mean)) +
+
+  # draw points
+    geom_vline(xintercept = c(1,2,3),linetype = "solid",color="gray90",lwd=0.25) +
+    geom_point(position = position_nudge(x=c(0.2,-0.2)),shape = 95, size=4) +
+    geom_errorbar(data=di, aes(ymin = min95, ymax = max95), width=0.5,position = position_nudge(x=c(0.2,-0.2))) +
+        
+    scale_y_continuous(breaks = seq(0,0.35,by=0.05), labels = sprintf("%1.0f",seq(0,0.35,by=0.05)*100)) + 
+    scale_x_continuous(breaks = 1:3) +
+    scale_color_manual(values=pcols[1:2]) + # guide=guide_legend(title="")
+    guides(color = "none", fill = "none", linetype = "none") +
+    labs(x = "Visit", y = "") + 
+    coord_cartesian(ylim=c(-0.02,0.37), xlim=c(0.5,3.5)) +
+    theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(5.5,11,5.5,0), "pt")
+      )
+  
+}
+
+
+#-------------------------------
+# combine the plots into a single
+# figure
+#-------------------------------
+
+plot_seroprev_wash_low <- pplots_wash[[1]] + mplots_wash[[1]] + pplots_wash[[2]] + mplots_wash[[2]] + 
+  pplots_wash[[3]] + mplots_wash[[3]] + pplots_wash[[4]] + mplots_wash[[4]] + 
+  pplots_wash[[5]] + mplots_wash[[5]] + pplots_wash[[6]] + mplots_wash[[6]] +
+  plot_layout(ncol=6,nrow=2, axes = "keep", guides = "collect",
+              widths = rep(c(1,0.2),6)) + 
+  plot_annotation(title = "B") & theme(legend.position = "top", plot.title = element_text(face = "bold", size = 14)) 
+
+
+ggsave(filename = here("output","washbb-age-seroprev-wash_low.png"),plot_seroprev_wash_low, device = "png", width=260,height=150,units="mm")
+```
+
+
+```{r}
+#| label: 6combine WASH plots for high and low transmission
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+
+plot_seroprev_wash_highlow <- wrap_elements(plot_seroprev_wash_high) / wrap_elements(plot_seroprev_wash_low)
+
+plot_seroprev_wash_highlow
+
+ggsave(filename = here("output","manuscript-figures","washbb-age-seroprev-wash_high_low.png"),
+       plot_seroprev_wash_highlow, device = "png", width=260,height=260,units="mm")
+
+ggsave(filename = here("output","manuscript-figures","washbb-age-seroprev-wash_high_low.pdf"),
+       plot_seroprev_wash_highlow, device = "pdf", width=260,height=260,units="mm")
+```
+
+## By Nutrition intervention
+
+```{r}
+#| label: 6panel figure nutrition high transmission
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+#-------------------------------
+# loop over pathogens and plot
+# age-seroprevalence by pathogen
+#
+# the reason we do a loop rather
+# than simply use geom_smooth
+# is to control the loess fit
+#-------------------------------
+
+# get the list of pathogens 
+pathogens <- pathogen_labels_high
+pplots_nutr <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen
+  di <- d_pathogen %>% filter(pathogenf == pathogens[i])
+  
+  # fit loess by group and save predicted values
+  fiti <- loess(seropos ~ agemonth, data = di %>% filter(nutrf=="Nutrition"))
+  fitc <- loess(seropos ~ agemonth, data = di %>% filter(nutrf=="No Nutrition"))
+  di_pred <- data.frame(agemonth=seq(3,28,by=0.1))
+  di_pred$Nutrition <- predict(fiti, newdata = di_pred)
+  di_pred$Control <- predict(fitc, newdata = di_pred)
+  di_pred <- di_pred %>% 
+    pivot_longer(cols=c(Nutrition,Control),names_to = "nutrf", values_to = "pred") %>%
+    mutate(nutrf=factor(nutrf,levels=c("Control","Nutrition"),labels=c("No Nutrition","Nutrition")))
+  
+  # shift seropos a bit for rug plots
+  di <- di %>%
+    mutate(
+      seropos = ifelse(seropos==1,seropos+0.01,seropos - 0.01),
+      seropos = case_when(
+      nutrf == "Nutrition" & seropos == 1.01 ~ 1.02,
+      nutrf == "No Nutrition" & seropos == -0.01 ~ -0.02,
+      TRUE ~ as.numeric(seropos))
+           )
+  
+    # plot age seroprev
+    pplots_nutr[[i]] <- ggplot(data=di, aes(x=agemonth, y = seropos, group = nutrf, color = nutrf)) + 
+      facet_wrap(.~pathogenf) +
+  # draw shade boxes
+        geom_rect(data=d_shade_box1,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+        geom_rect(data=d_shade_box2,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+
+  # draw points
+    geom_point(alpha=0.1, shape = 95, size=0.1) +
+    geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols[c(1,3)], guide=guide_legend(title="")) +
+    labs(x = "Age (months)", y = "IgG seroprevalence (%)") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0,30)) +
+    theme_classic() +
+      theme(
+        legend.position = "bottom",
+        plot.margin = unit(c(5.5,0,5.5,5.5), "pt")
+      )
+  
+}
+
+#-------------------------------
+# loop over pathogens and plot
+# the marginal means
+#-------------------------------
+# get the list of pathogens 
+pathogens <- pathogen_labels_high
+mplots_nutr <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen & WASH contrasts
+  di <- marg_means_by_visit %>% 
+    filter(pathogenf == pathogens[i], marginal_mean %in% c("Nutrition","No Nutrition"))
+
+  
+  # plot marginally averaged seroprev
+    mplots_nutr[[i]] <- ggplot(data=di, aes(x=visit, y = emmean, color = marginal_mean)) +
+
+  # draw points
+    geom_vline(xintercept = c(1,2,3),linetype = "solid",color="gray90",lwd=0.25) +
+    geom_point(position = position_nudge(x=c(0.2,-0.2)),shape = 95, size=4) +
+    geom_errorbar(data=di, aes(ymin = min95, ymax = max95), width=0.5,position = position_nudge(x=c(0.2,-0.2))) +
+        
+    scale_y_continuous(breaks = seq(0,1,by=0.2), labels = sprintf("%1.0f",seq(0,1,by=0.2)*100)) + 
+    scale_x_continuous(breaks = 1:3) +
+    scale_color_manual(values=pcols[c(1,3)]) + 
+    guides(color = "none", fill = "none", linetype = "none") +
+    labs(x = "Visit", y = "") + 
+    coord_cartesian(ylim=c(-0.02,1.02), xlim=c(0.5,3.5)) +
+    theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(5.5,11,5.5,1), "pt")
+      )
+  
+}
+
+
+#-------------------------------
+# combine the plots into a single
+# figure
+#-------------------------------
+plot_seroprev_nutr_high <- pplots_nutr[[1]] + mplots_nutr[[1]] + pplots_nutr[[2]] + mplots_nutr[[2]] + 
+  pplots_nutr[[3]] + mplots_nutr[[3]] + pplots_nutr[[4]] + mplots_nutr[[4]] + 
+  pplots_nutr[[5]] + mplots_nutr[[5]] + pplots_nutr[[6]] + mplots_nutr[[6]] +
+  plot_layout(ncol=6,nrow=2, axes = "keep", guides = "collect",
+              widths = rep(c(1,0.2),6)) +
+  plot_annotation(title = "A") & theme(legend.position = "top", plot.title = element_text(face = "bold", size = 14))
+
+ggsave(filename = here("output","washbb-age-seroprev-nutr_high.png"),plot_seroprev_nutr_high, device = "png", width=260,height=150,units="mm")
+
+```
+
+
+```{r}
+#| label: 6panel figure nutrition low transmission
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+#-------------------------------
+# loop over pathogens and plot
+# age-seroprevalence by pathogen
+#
+# the reason we do a loop rather
+# than simply use geom_smooth
+# is to control the loess fit
+#-------------------------------
+
+# get the list of pathogens 
+pathogens <- pathogen_labels_low
+pplots_nutr <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen
+  di <- d_pathogen %>% filter(pathogenf == pathogens[i])
+  
+  # fit loess by group and save predicted values
+  fiti <- loess(seropos ~ agemonth, data = di %>% filter(nutrf=="Nutrition"))
+  fitc <- loess(seropos ~ agemonth, data = di %>% filter(nutrf=="No Nutrition"))
+  di_pred <- data.frame(agemonth=seq(3,28,by=0.1))
+  di_pred$Nutrition <- predict(fiti, newdata = di_pred)
+  di_pred$Control <- predict(fitc, newdata = di_pred)
+  di_pred <- di_pred %>% 
+    pivot_longer(cols=c(Nutrition,Control),names_to = "nutrf", values_to = "pred") %>%
+    mutate(nutrf=factor(nutrf,levels=c("Control","Nutrition"),labels=c("No Nutrition","Nutrition")))
+  
+  # shift seropos down a lot (to 0.4) for rug plots
+  di <- di %>%
+    mutate(
+      seropos = ifelse(seropos==1,seropos-0.65,seropos - 0.015),
+      seropos = case_when(
+      nutrf == "Nutrition" & seropos >0 ~ 0.355,
+      nutrf == "No Nutrition" & seropos < 0 ~ -0.02,
+      TRUE ~ as.numeric(seropos))
+           )
+  
+    # plot age seroprev
+    pplots_nutr[[i]] <- ggplot(data=di, aes(x=agemonth, y = seropos, group = nutrf, color = nutrf)) + 
+      facet_wrap(.~pathogenf) +
+  # draw shade boxes
+        geom_rect(data=d_shade_box1,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+        geom_rect(data=d_shade_box2,aes(xmin = minX, xmax = maxX, ymin = 0, ymax = 1), inherit.aes=FALSE, alpha=0.05) +
+
+  # draw points
+    geom_point(alpha=0.1, shape = 95, size=0.1) +
+    geom_line(data=di_pred, aes(x=agemonth,y=pred)) +
+
+    scale_y_continuous(breaks = seq(0,0.35,by=0.05), labels = sprintf("%1.0f",seq(0,0.35,by=0.05)*100)) + 
+    scale_x_continuous(breaks = seq(0,36,by=6)) +
+    scale_color_manual(values=pcols[c(1,3)], guide=guide_legend(title="")) +
+    labs(x = "Age (months)", y = "IgG seroprevalence (%)") + 
+    coord_cartesian(ylim=c(-0.02,0.37), xlim=c(0,30)) +
+    theme_classic() +
+      theme(
+        legend.position = "bottom",
+        plot.margin = unit(c(5.5,0,5.5,5.5), "pt")
+      )
+  
+}
+
+#-------------------------------
+# loop over pathogens and plot
+# the marginal means
+#-------------------------------
+# get the list of pathogens 
+pathogens <- pathogen_labels_low
+mplots_nutr <- list()
+
+for(i in 1:length(pathogens)) {
+  
+  # filter to the pathogen & WASH contrasts
+  di <- marg_means_by_visit %>% 
+    filter(pathogenf == pathogens[i], marginal_mean %in% c("Nutrition","No Nutrition"))
+
+  
+  # plot marginally averaged seroprev
+    mplots_nutr[[i]] <- ggplot(data=di, aes(x=visit, y = emmean, color = marginal_mean)) +
+
+  # draw points
+    geom_vline(xintercept = c(1,2,3),linetype = "solid",color="gray90",lwd=0.25) +
+     geom_point(position = position_nudge(x=c(0.2,-0.2)),shape = 95, size=4) +
+    geom_errorbar(data=di, aes(ymin = min95, ymax = max95), width=0.5,position = position_nudge(x=c(0.2,-0.2))) +
+        
+    scale_y_continuous(breaks = seq(0,0.35,by=0.05), labels = sprintf("%1.0f",seq(0,0.35,by=0.05)*100)) + 
+    scale_x_continuous(breaks = 1:3) +
+    scale_color_manual(values=pcols[c(1,3)]) + 
+    guides(color = "none", fill = "none", linetype = "none") +
+    labs(x = "Visit", y = "") + 
+    coord_cartesian(ylim=c(-0.02,0.37), xlim=c(0.5,3.5)) +
+    theme_classic() +
+      theme(
+        legend.position = "none",
+        panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.line.y = element_blank(),
+        plot.margin = unit(c(5.5,11,5.5,1), "pt")
+      )
+  
+}
+
+
+#-------------------------------
+# combine the plots into a single
+# figure
+#-------------------------------
+plot_seroprev_nutr_low <- pplots_nutr[[1]] + mplots_nutr[[1]] + pplots_nutr[[2]] + mplots_nutr[[2]] + 
+  pplots_nutr[[3]] + mplots_nutr[[3]] + pplots_nutr[[4]] + mplots_nutr[[4]] + 
+  pplots_nutr[[5]] + mplots_nutr[[5]] + pplots_nutr[[6]] + mplots_nutr[[6]] +
+  plot_layout(ncol=6,nrow=2, axes = "keep", guides = "collect",
+              widths = rep(c(1,0.2),6))  +
+  plot_annotation(title = "B") & theme(legend.position = "top", plot.title = element_text(face = "bold", size = 14))
+
+plot_seroprev_nutr_low
+
+ggsave(filename = here("output","washbb-age-seroprev-nutr_low.png"),plot_seroprev_nutr_low, device = "png", width=260,height=150,units="mm")
+```
+
+```{r}
+#| label: 6combine Nutrition plots for high and low transmission
+#| warning: FALSE
+#| fig-height: 10
+#| fig-width: 8
+
+plot_seroprev_nutr_highlow <- wrap_elements(plot_seroprev_nutr_high) / wrap_elements(plot_seroprev_nutr_low)
+
+plot_seroprev_nutr_highlow
+
+ggsave(filename = here("output","manuscript-figures","washbb-age-seroprev-nutr_high_low.png"),
+       plot_seroprev_nutr_highlow, device = "png", width=260,height=260,units="mm")
+
+ggsave(filename = here("output","manuscript-figures","washbb-age-seroprev-nutr_high_low.pdf"),
+       plot_seroprev_nutr_highlow, device = "pdf", width=260,height=260,units="mm")
+```
+
+
+# Session Info
+```{r}
+#| label: session info
+sessionInfo()
+```
+
+
